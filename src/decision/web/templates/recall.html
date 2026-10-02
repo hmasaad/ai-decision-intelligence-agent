@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block title %}Memory · AI Decision Intelligence{% endblock %}
+{% block body %}
+  <section class="panel">
+    <h2>Decision memory</h2>
+    <form class="frame-form" method="get" action="/recall">
+      <label>
+        Question
+        <input name="q" value="{{ question }}" placeholder="Why did we choose partial migration instead of full migration?" required>
+      </label>
+      <button class="button button-primary" type="submit">Ask</button>
+    </form>
+    {% if answer %}
+      <pre class="frame">{{ answer }}</pre>
+    {% else %}
+      <p class="meta">Ask why a stored choice was made. The answer is rebuilt from that decision's record.</p>
+    {% endif %}
+  </section>
+{% endblock %}

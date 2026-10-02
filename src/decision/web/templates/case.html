@@ -1,0 +1,511 @@
+{% extends "base.html" %}
+{% block title %}{{ case.decision }} · AI Decision Intelligence{% endblock %}
+{% block body %}
+  <section class="hero">
+    <div>
+      <p class="eyebrow">{{ case.organization }} · {{ case.status.value }}</p>
+      <h1>{{ case.decision }}</h1>
+      <p class="mission">{{ case.objective or "Objective not stated." }}</p>
+    </div>
+    {% if case.brief and case.brief.recommendation_key %}
+      <p class="recommendation">
+        <span>Recommendation</span>
+        {% for option in case.options if option.key == case.brief.recommendation_key %}
+          {{ option.key }}. {{ option.name }}
+        {% endfor %}
+        <small>Confidence {{ case.brief.confidence }}</small>
+        {% for item in view.judgments if item.stance_key == "inferred" %}
+          <small>{{ item.label }} {{ item.display }} · {{ item.stance }} · {{ item.confidence }}</small>
+        {% endfor %}
+      </p>
+    {% elif not view.ready %}
+      <p class="recommendation waiting">Framed, and not ready to recommend.</p>
+    {% endif %}
+  </section>
+
+  {% if error %}
+    <p class="banner" role="alert">{{ error }}</p>
+  {% endif %}
+  {% if case.reevaluations and case.status.value == "briefed" %}
+    <p class="banner">Re-evaluation required. A person needs to review the updated analysis.</p>
+  {% endif %}
+
+  <ol class="stepper">
+    {% for step in view.progress %}
+      <li class="{{ step.state }}">
+        <a href="#{{ step.id }}">{{ step.label }}</a>
+      </li>
+    {% endfor %}
+  </ol>
+
+  <section id="request" class="panel">
+    <h2>Decision request</h2>
+    <blockquote>{{ case.request }}</blockquote>
+    {% if case.asked_by %}<p class="meta">Asked by {{ case.asked_by }}</p>{% endif %}
+  </section>
+
+  <section id="evidence" class="panel">
+    <h2>Context &amp; evidence</h2>
+    <ul class="sources">
+      {% for source in view.sources %}
+        <li class="{% if source.count %}filled{% endif %}">{{ source.label }}{% if source.count %} · {{ source.count }}{% endif %}</li>
+      {% endfor %}
+    </ul>
+    {% if view.claims %}
+      <ul class="evidence">
+        {% for item in view.claims %}
+          <li>
+            <p class="claim">{{ item.claim }}</p>
+            <dl class="provenance">
+              <div><dt>Source</dt><dd>{{ item.source }}</dd></div>
+              <div><dt>Timestamp</dt><dd>{{ item.timestamp }}</dd></div>
+              <div><dt>Confidence</dt><dd>{{ item.confidence }}</dd></div>
+              <div><dt>Freshness</dt><dd>{{ item.freshness }}</dd></div>
+            </dl>
+          </li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      <p class="meta">No evidence collected yet. The decision can be framed, and it cannot be scored.</p>
+    {% endif %}
+    {% if priors %}
+      <h3>Priors from earlier decisions</h3>
+      <ul class="priors">
+        {% for prior in priors %}
+          <li>{{ prior.statement }}</li>
+        {% endfor %}
+      </ul>
+    {% endif %}
+  </section>
+
+  <section id="frame" class="panel">
+    <h2>Decision framing</h2>
+    <pre class="frame">{{ view.frame_text }}</pre>
+    {% if view.gaps %}
+      <p class="meta">Still missing: {{ view.gaps | join(", ") }}.</p>
+    {% endif %}
+  </section>
+
+  <section id="model" class="panel">
+    <h2>Alternatives &amp; constraints</h2>
+    {% if case.constraints %}
+      <ul>
+        {% for item in case.constraints %}
+          <li>{{ item.statement }}</li>
+        {% endfor %}
+      </ul>
+    {% endif %}
+    {% if view.columns %}
+      <div class="table-wrap">
+        <table class="summary">
+          <thead>
+            <tr>
+              <th>Option</th>
+              <th>Role</th>
+              <th>Engineers</th>
+              <th>Weeks</th>
+              <th>Downtime</th>
+              <th>Fits</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for column in view.columns %}
+              <tr {% if column.recommended %}class="chosen"{% endif %}>
+                <td>
+                  <strong>{{ column.key }}. {{ column.name }}</strong>
+                  <span class="meta">{{ column.summary }}</span>
+                </td>
+                <td>{% if column.role %}<span class="role">{{ column.role }}</span>{% endif %}</td>
+                <td>{{ column.engineers }}</td>
+                <td>{{ column.weeks }}</td>
+                <td>{{ column.downtime }}</td>
+                <td>
+                  {% if column.feasible %}
+                    Fits
+                  {% elif column.blocked %}
+                    Blocked. {{ column.blocked | join(" ") }}
+                  {% else %}
+                    Not estimated
+                  {% endif %}
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <p class="meta">No options yet.</p>
+    {% endif %}
+  </section>
+
+  <section id="simulate" class="panel">
+    <h2>Scenario simulation</h2>
+    {% if view.trees %}
+      <p class="meta">The dollar figure is the annual infrastructure change against doing nothing. A stress case is how that result breaks.</p>
+      {% for tree in view.trees %}
+        <article class="scenario-card">
+          <h3>{{ tree.key }}. {{ tree.name }}</h3>
+          <div class="case-tree">
+            {% for item in tree.cases %}
+              <div>
+                <span>{{ item.label }}</span>
+                <strong class="outcome-{{ item.kind }}">{{ item.headline }}</strong>
+                {% if not item.feasible %}<em>Blocked</em>{% endif %}
+              </div>
+            {% endfor %}
+          </div>
+          <ul class="stress">
+            {% for item in tree.stresses %}
+              <li>
+                <span>{{ item.label }}</span>
+                <strong class="outcome-{{ item.kind }}">{{ item.headline }}</strong>
+                <p>{{ item.detail }}</p>
+              </li>
+            {% endfor %}
+          </ul>
+        </article>
+      {% endfor %}
+      <p class="meta">Each cell below is the expected case, with the best-to-worst band in parentheses.</p>
+      <div class="table-wrap">
+        <table class="summary">
+          <thead>
+            <tr>
+              <th>Success metric</th>
+              {% for column in view.columns %}
+                <th>{{ column.key }}. {{ column.name }}</th>
+              {% endfor %}
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in view.rows %}
+              <tr>
+                <td>{{ row.name }}</td>
+                {% for cell in row.cells %}
+                  <td>{{ cell }}</td>
+                {% endfor %}
+              </tr>
+            {% endfor %}
+            <tr>
+              <td>Expected score</td>
+              {% for column in view.columns %}
+                <td>{{ column.score }}</td>
+              {% endfor %}
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <p class="meta">Scenarios wait until every option has an estimate.</p>
+    {% endif %}
+  </section>
+
+  <section id="whatif" class="panel">
+    <h2>What if this assumption changes?</h2>
+    {% if view.whatif %}
+      <p>{{ view.whatif.question }}</p>
+      <ol class="cascade">
+        {% for step in view.whatif.steps %}
+          <li>
+            <span>{{ step.label }}</span>
+            <strong>{{ step.before }} → {{ step.after }}</strong>
+            {% if step.note %}<p>{{ step.note }}</p>{% endif %}
+          </li>
+        {% endfor %}
+      </ol>
+      <p>
+        Recommendation
+        {% if view.whatif.changed %}changes{% else %}stays{% endif %}:
+        {{ view.whatif.recommendation_before }} → {{ view.whatif.recommendation_after }}
+      </p>
+      <form method="get" class="whatif-form">
+        <label>Engineers, from <input name="from_engineers" value="{{ view.whatif.from_engineers }}" inputmode="decimal"></label>
+        <label>to <input name="engineers" value="{{ view.whatif.engineers }}" inputmode="decimal"></label>
+        <label>Weeks, from <input name="from_weeks" value="{{ view.whatif.from_weeks }}" inputmode="decimal"></label>
+        <label>to <input name="weeks" value="{{ view.whatif.weeks }}" inputmode="decimal"></label>
+        <label>Downtime
+          <select name="downtime">
+            <option value="keep" {% if view.whatif.downtime == "keep" %}selected{% endif %}>Keep the current rule</option>
+            <option value="allow" {% if view.whatif.downtime == "allow" %}selected{% endif %}>Allow downtime</option>
+            <option value="forbid" {% if view.whatif.downtime == "forbid" %}selected{% endif %}>Forbid downtime</option>
+          </select>
+        </label>
+        <button type="submit">Ask</button>
+      </form>
+      {% if view.opening %}
+        <p><a href="?{{ view.opening }}">What if the blocked higher-scoring option is given the room it needs?</a></p>
+      {% endif %}
+    {% else %}
+      <p class="meta">What-if questions start once every option has an estimate.</p>
+    {% endif %}
+  </section>
+
+  <section id="risk" class="panel">
+    <h2>Risk &amp; uncertainty</h2>
+    {% if view.judgments %}
+      <ul class="judgments">
+        {% for item in view.judgments %}
+          <li>
+            <span class="stance stance-{{ item.stance_key }}">{{ item.stance }}</span>
+            <strong>{{ item.label }}</strong>
+            <em>{{ item.display }}</em>
+            <small>Confidence {{ item.confidence }}</small>
+            <p>{{ item.basis }}</p>
+          </li>
+        {% endfor %}
+      </ul>
+    {% endif %}
+    {% if case.risks %}
+      <ul class="risks">
+        {% for risk in case.risks %}
+          <li>
+            <strong>{{ risk.title }}</strong>
+            <p>{{ risk.detail }}</p>
+            <dl>
+              <dt>Probability</dt><dd>{{ risk.likelihood }}</dd>
+              <dt>Impact</dt><dd>{{ risk.impact }}</dd>
+              {% if risk.detectability %}<dt>Detectability</dt><dd>{{ risk.detectability }}</dd>{% endif %}
+              <dt>Mitigation</dt>
+              <dd>
+                <ul>
+                  {% for step in risk.mitigations %}
+                    <li>{{ step }}</li>
+                  {% endfor %}
+                </ul>
+              </dd>
+              {% if risk.residual %}<dt>Residual risk</dt><dd>{{ risk.residual }}</dd>{% endif %}
+            </dl>
+          </li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      <p class="meta">Risk shows up once the options have been simulated.</p>
+    {% endif %}
+  </section>
+
+  <section id="brief" class="panel">
+    <h2>Decision brief</h2>
+    {% if case.brief %}
+      <pre class="frame brief">{{ case.brief.text }}</pre>
+    {% else %}
+      <p class="meta">The brief is written after the options are estimated.</p>
+    {% endif %}
+  </section>
+
+  <section id="reevaluate" class="panel">
+    <h2>Re-evaluate</h2>
+    {% if case.reevaluations %}
+      {% for item in case.reevaluations %}
+        <ol class="cascade">
+          <li>
+            <span>Original decision</span>
+            <strong>{{ case.decision }}</strong>
+          </li>
+          <li>
+            <span>New evidence</span>
+            <strong>{{ item.statement }}</strong>
+          </li>
+          <li>
+            <span>Assumption</span>
+            <p>{{ item.assumption }}</p>
+          </li>
+          <li>
+            <span>Risk</span>
+            <p>{{ item.risk }}</p>
+          </li>
+          <li>
+            <span>Expected outcome</span>
+            <p>{{ item.outcome }}</p>
+          </li>
+          <li>
+            <span>Confidence</span>
+            <strong>{{ item.confidence_before }} → {{ item.confidence_after }}</strong>
+          </li>
+          <li>
+            <span>Re-evaluate</span>
+            <strong>Human review required</strong>
+          </li>
+        </ol>
+      {% endfor %}
+      {% if case.review_action == "approved" %}
+        <p>The earlier approval stands until a person reviews this update.</p>
+      {% endif %}
+    {% else %}
+      <p class="meta">New evidence is checked against the assumptions, the risks, and the expected outcome.</p>
+    {% endif %}
+    {% if case.brief %}
+      <form method="post" action="/decisions/{{ case.id }}/evidence">
+        <input type="hidden" name="example" value="regulation">
+        <button class="button" type="submit">Record the payments regulation</button>
+      </form>
+      <form class="frame-form" method="post" action="/decisions/{{ case.id }}/evidence">
+        <label>
+          New evidence
+          <textarea name="statement" rows="3" required placeholder="What changed?"></textarea>
+        </label>
+        <div class="split">
+          <label>Source <input name="source" required></label>
+          <label>
+            Channel
+            <select name="channel">
+              {% for key, label in channels.items() %}
+                <option value="{{ key }}">{{ label }}</option>
+              {% endfor %}
+            </select>
+          </label>
+        </div>
+        <div class="split three">
+          <label>
+            Challenges
+            <select name="challenges">
+              <option value="">Nothing yet</option>
+              <option value="downtime">Downtime</option>
+              <option value="timeline">Timeline</option>
+              <option value="headcount">Headcount</option>
+            </select>
+          </label>
+          <label>New limit <input name="limit" inputmode="decimal" placeholder="Weeks or engineers"></label>
+          <label>Confidence <input name="confidence" value="0.6" inputmode="decimal"></label>
+        </div>
+        <button class="button button-primary" type="submit">Check this evidence</button>
+      </form>
+    {% endif %}
+  </section>
+
+  <section id="human" class="panel">
+    <h2>Human decision</h2>
+    {% if case.review_action %}
+      <p>{{ case.review_action }}{% if case.review_note %} — {{ case.review_note }}{% endif %}</p>
+    {% endif %}
+    {% if case.status.value in ["briefed", "deferred"] %}
+      <form class="review-actions" method="post" action="/decisions/{{ case.id }}/review">
+        <label>
+          Approved by
+          <input name="approver" placeholder="Who is approving">
+        </label>
+        <label>
+          Note
+          <input name="note" placeholder="Why this call">
+        </label>
+        <button class="button button-primary" name="action" value="approved">Approve</button>
+        <button class="button" name="action" value="deferred">Defer</button>
+        <button class="button button-quiet" name="action" value="rejected">Reject</button>
+      </form>
+    {% elif not case.review_action %}
+      <p class="meta">A person decides after the brief exists.</p>
+    {% endif %}
+  </section>
+
+  <section id="execute" class="panel">
+    <h2>Execute decision</h2>
+    {% if case.execution %}
+      <ol class="steps">
+        {% for step in case.execution %}
+          <li>
+            <strong>{{ step.name }}</strong>
+            <span>{{ step.window }}</span>
+            <p>{{ step.guardrail }}</p>
+            {% if step.status == "done" %}
+              <em>Done</em>
+            {% elif case.status.value == "executing" %}
+              <form method="post" action="/decisions/{{ case.id }}/steps/{{ step.id }}">
+                <button class="button" type="submit">Mark done</button>
+              </form>
+            {% endif %}
+          </li>
+        {% endfor %}
+      </ol>
+    {% elif case.status.value in ["rejected", "deferred"] %}
+      <p class="meta">This decision was not approved, so there is no execution plan.</p>
+    {% else %}
+      <p class="meta">The plan is written when a person approves an option.</p>
+    {% endif %}
+  </section>
+
+  <section id="outcome" class="panel">
+    <h2>Outcome tracking</h2>
+    {% if view.outcomes %}
+      {% for line in view.outcomes %}
+        <article class="outcome-card">
+          <h3>{{ line.name }}</h3>
+          <p>{{ line.name }} came in at {{ line.actual }}. The expected case was {{ line.predicted }}.</p>
+          <dl class="chain">
+            <dt>Predicted</dt><dd>{{ line.predicted }}</dd>
+            <dt>Actual</dt><dd>{{ line.actual }}</dd>
+            <dt>Variance</dt><dd>{{ line.variance }}</dd>
+            <dt>Root cause</dt><dd>{{ line.cause }}</dd>
+            <dt>Learning</dt><dd>{{ line.learning }}</dd>
+          </dl>
+        </article>
+      {% endfor %}
+    {% elif view.steps_done %}
+      <form class="frame-form" method="post" action="/decisions/{{ case.id }}/outcomes">
+        {% for metric in case.metrics %}
+          <label>
+            {{ metric.name }}
+            <input name="actual_{{ metric.id }}" type="number" step="any" required>
+          </label>
+        {% endfor %}
+        <button class="button button-primary" type="submit">Record outcome</button>
+      </form>
+    {% else %}
+      <p class="meta">Record what happened after the execution plan is finished.</p>
+    {% endif %}
+  </section>
+
+  <section id="learn" class="panel">
+    <h2>Learn &amp; re-evaluate</h2>
+    {% if case.lesson %}
+      <p class="bias">Estimate was {{ case.lesson.bias }}.</p>
+      <ul>
+        {% for line in case.lesson.statements %}
+          <li>{{ line }}</li>
+        {% endfor %}
+      </ul>
+      {% if case.lesson.revisions %}
+        <h3>Use these numbers next time</h3>
+        <ul>
+          {% for line in case.lesson.revisions %}
+            <li>{{ line }}</li>
+          {% endfor %}
+        </ul>
+      {% endif %}
+      <p>{{ case.lesson.reason }}</p>
+      {% if case.lesson.reevaluate %}
+        <p class="banner">Re-evaluate the estimate before the next decision of this pattern.</p>
+      {% endif %}
+    {% elif case.status.value == "tracking" %}
+      <form method="post" action="/decisions/{{ case.id }}/learn">
+        <button class="button button-primary" type="submit">Write the lesson</button>
+      </form>
+    {% else %}
+      <p class="meta">The lesson is written from the recorded outcome.</p>
+    {% endif %}
+  </section>
+
+  <section id="memory" class="panel">
+    <h2>Decision memory</h2>
+    <p class="meta">The record that answers, later, why this call was made.</p>
+    <h3>Why was it made?</h3>
+    <p>{{ view.memory.why }}</p>
+    <h3>What evidence existed?</h3>
+    <ul>
+      {% for line in view.memory.evidence %}<li>{{ line }}</li>{% endfor %}
+    </ul>
+    <h3>What assumptions were made?</h3>
+    <ul>
+      {% for line in view.memory.assumptions %}<li>{{ line }}</li>{% endfor %}
+    </ul>
+    <h3>Which alternatives were rejected?</h3>
+    <ul>
+      {% for line in view.memory.rejected %}<li>{{ line }}</li>{% endfor %}
+    </ul>
+    <h3>Who approved it?</h3>
+    <p>{{ view.memory.approved }}</p>
+    <h3>What happened afterward?</h3>
+    <ul>
+      {% for line in view.memory.afterward %}<li>{{ line }}</li>{% endfor %}
+    </ul>
+    <h3>What did we learn?</h3>
+    <p>{{ view.memory.learned }}</p>
+  </section>
+{% endblock %}

@@ -1,0 +1,146 @@
+{% extends "base.html" %}
+{% block title %}Decisions · AI Decision Intelligence{% endblock %}
+{% block body %}
+  <section class="hero">
+    <div>
+      <p class="eyebrow">Decision loop</p>
+      <h1>Frame the decision before you pick a side.</h1>
+      <p class="mission">A vague request becomes an objective, a set of options, the constraints that can kill them, and the metrics that will tell you later whether the call was right.</p>
+    </div>
+  </section>
+
+  {% if error %}
+    <p class="banner" role="alert">{{ error }}</p>
+  {% endif %}
+
+  <ol class="engine-rail" aria-label="Decision loop">
+    <li>Decision request</li>
+    <li>Context &amp; evidence</li>
+    <li>Decision framing</li>
+    <li>Alternatives &amp; constraints</li>
+    <li>Scenario simulation</li>
+    <li>Risk &amp; uncertainty</li>
+    <li>Decision brief</li>
+    <li>Human decision</li>
+    <li>Execute</li>
+    <li>Outcome tracking</li>
+    <li class="engine-out">Learn &amp; re-evaluate</li>
+  </ol>
+
+  <section class="panel">
+    <div class="section-head">
+      <h2>Ask the memory</h2>
+      <p>Six months later, reconstruct why a choice was made.</p>
+    </div>
+    <form class="frame-form" method="get" action="/recall">
+      <label>
+        Question
+        <input name="q" placeholder="Why did we choose partial migration instead of full migration?">
+      </label>
+      <button class="button button-primary" type="submit">Ask</button>
+    </form>
+  </section>
+
+  <section class="panel">
+    <div class="section-head">
+      <h2>Frame a request</h2>
+      <p>The example below is the migration decision. Submit it as written, or change the subject once you know which service you mean.</p>
+    </div>
+    <form class="frame-form" method="post" action="/frame">
+      <label>
+        Request
+        <textarea name="request_text" rows="3" required>Should we migrate this service to a new architecture?</textarea>
+      </label>
+      <div class="split">
+        <label>
+          Subject
+          <input name="subject" value="X">
+        </label>
+        <label>
+          Asked by
+          <input name="asked_by" value="Platform">
+        </label>
+      </div>
+      <label>
+        Objective
+        <input name="objective" value="Reduce operational cost and deployment time.">
+      </label>
+      <div class="split three">
+        <label>
+          Engineers available
+          <input name="engineers" type="number" min="0" step="1" value="3">
+        </label>
+        <label>
+          Timeline in weeks
+          <input name="weeks" type="number" min="0" step="1" value="8">
+        </label>
+        <label class="check">
+          <input type="checkbox" name="downtime" value="forbid" checked>
+          No production downtime
+        </label>
+      </div>
+      <button class="button button-primary" type="submit">Frame this decision</button>
+    </form>
+  </section>
+
+  <section class="panel">
+    <div class="section-head">
+      <h2>Worked decision</h2>
+      <p>Harbor’s billing service has the estimates filled in. The brief recommends a partial migration and waits for a person.</p>
+    </div>
+    <form method="post" action="/demo">
+      <button class="button" type="submit">Load the billing migration</button>
+    </form>
+  </section>
+
+  <section>
+    <div class="section-head">
+      <h2>Open decisions</h2>
+    </div>
+    {% if decisions %}
+      <div class="table-wrap">
+        <table class="summary">
+          <thead>
+            <tr>
+              <th>Decision</th>
+              <th>Status</th>
+              <th>Recommendation</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for case in decisions %}
+              <tr>
+                <td><a href="/decisions/{{ case.id }}">{{ case.decision }}</a></td>
+                <td>{{ case.status.value }}</td>
+                <td>
+                  {% if case.brief and case.brief.recommendation_key %}
+                    {% for option in case.options if option.key == case.brief.recommendation_key %}
+                      {{ option.key }}. {{ option.name }}
+                    {% endfor %}
+                  {% else %}
+                    Waiting on estimates
+                  {% endif %}
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <p class="empty">No decisions yet.</p>
+    {% endif %}
+  </section>
+
+  {% if priors %}
+    <section>
+      <div class="section-head">
+        <h2>What the last decision taught</h2>
+      </div>
+      <ul class="priors">
+        {% for prior in priors %}
+          <li>{{ prior.statement }}</li>
+        {% endfor %}
+      </ul>
+    </section>
+  {% endif %}
+{% endblock %}
