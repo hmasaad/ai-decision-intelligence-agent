@@ -9,10 +9,19 @@ from pydantic import ValidationError
 
 from decision.agent import DecisionAgent
 from decision.errors import DecisionError
+from decision.alternatives import render_alternatives
+from decision.assumptions import render_assumptions
+from decision.confidence import render_confidence
+from decision.scenarios import render_engine
+from decision.evidence import render_claims
 from decision.text import render_frame
+from decision.graph import ask as ask_graph
+from decision.graph import render_graph
+from decision.reason import render_map
 from decision.memory import recall
-from decision.models import Evidence
+from decision.models import Evidence, Stage
 from decision.reevaluate import payments_regulation, render_review
+from decision.registry import render_registry
 from decision.whatif import answer, posed, render_whatif
 
 
@@ -29,6 +38,30 @@ def main(argv: list[str] | None = None) -> int:
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("demo", help="Load the Harbor billing migration and write the brief")
     commands.add_parser("list", help="List decisions in the workspace")
+
+    register = commands.add_parser("register", help="Create a decision in the registry")
+    register.add_argument("question")
+    register.add_argument("--goal", default="")
+    register.add_argument("--context", default="")
+    register.add_argument("--owner", default="")
+    register.add_argument("--option", action="append", default=[])
+    register.add_argument("--constraint", action="append", default=[])
+    register.add_argument("--assumption", action="append", default=[])
+    register.add_argument("--organization", default="Workspace")
+
+    update = commands.add_parser("update", help="Update a stored decision")
+    update.add_argument("decision_id")
+    update.add_argument("--goal")
+    update.add_argument("--question")
+    update.add_argument("--context")
+    update.add_argument("--owner")
+    update.add_argument("--option", action="append")
+    update.add_argument("--constraint", action="append")
+    update.add_argument("--assumption", action="append")
+    update.add_argument("--status", choices=[item.value for item in Stage])
+
+    inspect = commands.add_parser("inspect", help="Print a decision's registry record")
+    inspect.add_argument("decision_id")
 
     show = commands.add_parser("show", help="Print a framed decision")
     show.add_argument("decision_id")
@@ -74,6 +107,10 @@ def main(argv: list[str] | None = None) -> int:
     remembered = commands.add_parser("recall", help="Reconstruct why a stored decision was made")
     remembered.add_argument("question")
 
+    traced = commands.add_parser("graph", help="Show why a recommendation was reached, or ask the graph")
+    traced.add_argument("--decision", default="", help="Decision to trace")
+    traced.add_argument("question", nargs="*", help="A question for the graph")
+
     incoming = commands.add_parser("evidence", help="Add evidence and re-check the decision")
     incoming.add_argument("decision_id")
     incoming.add_argument("--statement", default="")
@@ -81,9 +118,26 @@ def main(argv: list[str] | None = None) -> int:
     incoming.add_argument("--channel", default="documentation")
     incoming.add_argument("--kind", default="update")
     incoming.add_argument("--confidence", type=float, default=0.6)
+    incoming.add_argument("--option", default="")
+    incoming.add_argument("--stance", default="", choices=["", "supports", "contradicts"])
     incoming.add_argument("--challenges", default="", choices=["", "downtime", "timeline", "headcount"])
     incoming.add_argument("--limit", type=float)
     incoming.add_argument("--regulation", action="store_true", help="Apply the payments-regulation example")
+
+    claims = commands.add_parser("claims", help="Show which evidence supports or contradicts each option")
+    claims.add_argument("decision_id")
+
+    assumptions = commands.add_parser("assumptions", help="Show the assumptions driving a decision")
+    assumptions.add_argument("decision_id")
+
+    generated = commands.add_parser("alternatives", help="Grade every option on the same criteria")
+    generated.add_argument("decision_id")
+
+    scenarios = commands.add_parser("scenarios", help="Show best, expected, and worst, and what an assumption change does")
+    scenarios.add_argument("decision_id")
+
+    measured = commands.add_parser("confidence", help="Show the recommendation, its confidence, and the main risks")
+    measured.add_argument("decision_id")
 
     serve = commands.add_parser("serve", help="Open the decision board")
     serve.add_argument("--port", type=int, default=8000)
@@ -106,6 +160,41 @@ def _dispatch(agent: DecisionAgent, args: argparse.Namespace) -> int:
         print(f"Loaded {case.id}. Status: {case.status.value}.")
         print()
         print(case.brief.text if case.brief else render_frame(case), end="")
+        return 0
+    if args.command == "register":
+        case = agent.register(
+            question=args.question,
+            goal=args.goal,
+            context=args.context,
+            owner=args.owner,
+            options=args.option,
+            constraints=args.constraint,
+            assumptions=args.assumption,
+            organization=args.organization,
+        )
+        print(f"Registered {case.id}. Status: {case.status.value}.")
+        print()
+        print(render_registry(case), end="")
+        return 0
+    if args.command == "update":
+        case = agent.update(
+            args.decision_id,
+            goal=args.goal,
+            question=args.question,
+            context=args.context,
+            owner=args.owner,
+            options=args.option,
+            constraints=args.constraint,
+            assumptions=args.assumption,
+            status=args.status,
+        )
+        print(f"Updated {case.id}. Status: {case.status.value}.")
+        print()
+        print(render_registry(case), end="")
+        return 0
+    if args.command == "inspect":
+        case = _require(agent, args.decision_id)
+        print(render_registry(case), end="")
         return 0
     if args.command == "list":
         cases = agent.cases()
@@ -185,6 +274,31 @@ def _dispatch(agent: DecisionAgent, args: argparse.Namespace) -> int:
     if args.command == "recall":
         print(agent.recall(args.question), end="")
         return 0
+    if args.command == "graph":
+        question = " ".join(args.question)
+        if not question:
+            case = _require(agent, args.decision)
+            print(render_map(case), end="")
+            print()
+            print(render_graph(case), end="")
+            return 0
+        print(ask_graph(agent.cases(), question, args.decision), end="")
+        return 0
+    if args.command == "claims":
+        print(render_claims(_require(agent, args.decision_id)), end="")
+        return 0
+    if args.command == "assumptions":
+        print(render_assumptions(_require(agent, args.decision_id)), end="")
+        return 0
+    if args.command == "alternatives":
+        print(render_alternatives(_require(agent, args.decision_id)), end="")
+        return 0
+    if args.command == "scenarios":
+        print(render_engine(_require(agent, args.decision_id)), end="")
+        return 0
+    if args.command == "confidence":
+        print(render_confidence(_require(agent, args.decision_id)), end="")
+        return 0
     if args.command == "evidence":
         case = _require(agent, args.decision_id)
         before = len(case.reevaluations)
@@ -228,6 +342,8 @@ def _evidence(args: argparse.Namespace) -> Evidence:
         channel=args.channel,
         observed_at=date.today(),
         confidence=args.confidence,
+        option_key=args.option or None,
+        stance=args.stance,
         challenges=args.challenges,
         limit=args.limit,
     )

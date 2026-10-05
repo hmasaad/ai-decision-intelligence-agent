@@ -5,11 +5,20 @@ from pathlib import Path
 from decision import store
 from decision.demo import billing_case
 from decision.errors import DecisionError
+from decision.alternatives import render_alternatives
+from decision.assumptions import render_assumptions
+from decision.confidence import render_confidence
+from decision.scenarios import render_engine
+from decision.evidence import render_claims
 from decision.frame import frame_request
+from decision.graph import ask as ask_graph
+from decision.graph import render_graph
+from decision.reason import render_map
 from decision.loop import apply_review, complete_step, learn, prepare, record_outcomes
 from decision.memory import recall as recall_question
 from decision.models import DecisionCase, Evidence, Prior
 from decision.reevaluate import incorporate
+from decision.registry import apply_update, register_case, render_registry
 from decision.store import utc_now
 from decision.text import slug
 
@@ -17,6 +26,67 @@ from decision.text import slug
 class DecisionAgent:
     def __init__(self, home: Path | None = None) -> None:
         self.home = home
+
+    def register(
+        self,
+        question: str,
+        goal: str = "",
+        context: str = "",
+        owner: str = "",
+        options: list[str] | None = None,
+        constraints: list[str] | None = None,
+        assumptions: list[str] | None = None,
+        organization: str = "Workspace",
+    ) -> DecisionCase:
+        drafted = register_case(
+            question=question,
+            goal=goal,
+            context=context,
+            owner=owner,
+            options=options,
+            constraints=constraints,
+            assumptions=assumptions,
+            organization=organization,
+        )
+        drafted = drafted.model_copy(update={"id": self._unique(drafted.id)})
+        return self._save(drafted)
+
+    def update(
+        self,
+        case_id: str,
+        *,
+        goal: str | None = None,
+        question: str | None = None,
+        context: str | None = None,
+        owner: str | None = None,
+        options: list[str] | None = None,
+        constraints: list[str] | None = None,
+        assumptions: list[str] | None = None,
+        status: str | None = None,
+    ) -> DecisionCase:
+        case = self._require(case_id)
+        return self._save(
+            apply_update(
+                case,
+                goal=goal,
+                question=question,
+                context=context,
+                owner=owner,
+                options=options,
+                constraints=constraints,
+                assumptions=assumptions,
+                status=status,
+            )
+        )
+
+    def inspect(self, case_id: str) -> str:
+        return render_registry(self._require(case_id))
+
+    def claims(self, case_id: str) -> str:
+        return render_claims(self._require(case_id))
+
+    def assumptions(self, case_id: str) -> str:
+        return render_assumptions(self._require(case_id))
 
     def demo(self) -> DecisionCase:
         return self._save(prepare(billing_case()))
@@ -55,6 +125,21 @@ class DecisionAgent:
 
     def recall(self, question: str) -> str:
         return recall_question(self.cases(), question)
+
+    def confidence(self, case_id: str) -> str:
+        return render_confidence(self._require(case_id))
+
+    def scenarios(self, case_id: str) -> str:
+        return render_engine(self._require(case_id))
+
+    def alternatives(self, case_id: str) -> str:
+        return render_alternatives(self._require(case_id))
+
+    def graph(self, question: str = "", decision_id: str = "") -> str:
+        if not question.strip():
+            case = self._require(decision_id)
+            return render_map(case) + "\n" + render_graph(case)
+        return ask_graph(self.cases(), question, decision_id)
 
     def priors(self, pattern: str | None = None) -> list[Prior]:
         with store.open_db(self.home) as connection:

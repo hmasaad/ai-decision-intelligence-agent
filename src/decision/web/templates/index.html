@@ -1,17 +1,79 @@
 {% extends "base.html" %}
-{% block title %}Decisions · AI Decision Intelligence{% endblock %}
+{% block title %}Agent · AI Decision Intelligence{% endblock %}
 {% block body %}
   <section class="hero">
     <div>
-      <p class="eyebrow">Decision loop</p>
-      <h1>Frame the decision before you pick a side.</h1>
-      <p class="mission">A vague request becomes an objective, a set of options, the constraints that can kill them, and the metrics that will tell you later whether the call was right.</p>
+      <p class="eyebrow">Agent</p>
+      <h1>Manage the decisions in this workspace.</h1>
+      <p class="mission">Register a question, frame a request, or open a decision the agent has already briefed. The agent informs the person who has to approve it.</p>
+      <p class="workspace">{{ workspace }}</p>
     </div>
+  </section>
+
+  <section class="stats" aria-label="Workspace">
+    <article>
+      <strong>{{ counts.total }}</strong>
+      <span>Decisions</span>
+    </article>
+    <article>
+      <strong>{{ counts.waiting }}</strong>
+      <span>Waiting for a person</span>
+    </article>
+    <article>
+      <strong>{{ counts.moving }}</strong>
+      <span>In execution</span>
+    </article>
+    <article>
+      <strong>{{ counts.learned }}</strong>
+      <span>Learned</span>
+    </article>
   </section>
 
   {% if error %}
     <p class="banner" role="alert">{{ error }}</p>
   {% endif %}
+
+  <section>
+    <div class="section-head">
+      <h2>Decisions</h2>
+    </div>
+    {% if decisions %}
+      <div class="table-wrap">
+        <table class="summary">
+          <thead>
+            <tr>
+              <th>Decision</th>
+              <th>Owner</th>
+              <th>Status</th>
+              <th>Recommendation</th>
+              <th>Confidence</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for case in decisions %}
+              <tr>
+                <td><a href="/decisions/{{ case.id }}">{{ case.decision or case.request }}</a></td>
+                <td>{{ case.owner or "Not recorded" }}</td>
+                <td>{{ case.status.value }}</td>
+                <td>
+                  {% if case.brief and case.brief.recommendation_key %}
+                    {% for option in case.options if option.key == case.brief.recommendation_key %}
+                      {{ option.key }}. {{ option.name }}
+                    {% endfor %}
+                  {% else %}
+                    Not recommended yet
+                  {% endif %}
+                </td>
+                <td>{{ confidence_label(case) }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <p class="empty">No decisions yet.</p>
+    {% endif %}
+  </section>
 
   <ol class="engine-rail" aria-label="Decision loop">
     <li>Decision request</li>
@@ -19,7 +81,7 @@
     <li>Decision framing</li>
     <li>Alternatives &amp; constraints</li>
     <li>Scenario simulation</li>
-    <li>Risk &amp; uncertainty</li>
+    <li>Risk &amp; confidence</li>
     <li>Decision brief</li>
     <li>Human decision</li>
     <li>Execute</li>
@@ -38,6 +100,50 @@
         <input name="q" placeholder="Why did we choose partial migration instead of full migration?">
       </label>
       <button class="button button-primary" type="submit">Ask</button>
+    </form>
+  </section>
+
+  <section class="panel">
+    <div class="section-head">
+      <h2>Register a decision</h2>
+      <p>Give the decision an identity before any option is scored. The example question is a Flutter app moving to architecture X.</p>
+    </div>
+    <form class="frame-form" method="post" action="/register">
+      <label>
+        Question
+        <textarea name="question" rows="2" required>Should we migrate our Flutter app to architecture X?</textarea>
+      </label>
+      <label>
+        Goal
+        <input name="goal" placeholder="What this decision is for">
+      </label>
+      <label>
+        Context
+        <textarea name="context" rows="2" placeholder="What is already true"></textarea>
+      </label>
+      <div class="split">
+        <label>
+          Owner
+          <input name="owner" placeholder="Who owns this decision">
+        </label>
+        <label>
+          Organization
+          <input name="organization" value="Workspace">
+        </label>
+      </div>
+      <label>
+        Options
+        <textarea name="options" rows="3" placeholder="One option per line"></textarea>
+      </label>
+      <label>
+        Constraints
+        <textarea name="constraints" rows="2" placeholder="One constraint per line"></textarea>
+      </label>
+      <label>
+        Assumptions
+        <textarea name="assumptions" rows="2" placeholder="One assumption per line"></textarea>
+      </label>
+      <button class="button button-primary" type="submit">Create this decision</button>
     </form>
   </section>
 
@@ -91,44 +197,6 @@
     <form method="post" action="/demo">
       <button class="button" type="submit">Load the billing migration</button>
     </form>
-  </section>
-
-  <section>
-    <div class="section-head">
-      <h2>Open decisions</h2>
-    </div>
-    {% if decisions %}
-      <div class="table-wrap">
-        <table class="summary">
-          <thead>
-            <tr>
-              <th>Decision</th>
-              <th>Status</th>
-              <th>Recommendation</th>
-            </tr>
-          </thead>
-          <tbody>
-            {% for case in decisions %}
-              <tr>
-                <td><a href="/decisions/{{ case.id }}">{{ case.decision }}</a></td>
-                <td>{{ case.status.value }}</td>
-                <td>
-                  {% if case.brief and case.brief.recommendation_key %}
-                    {% for option in case.options if option.key == case.brief.recommendation_key %}
-                      {{ option.key }}. {{ option.name }}
-                    {% endfor %}
-                  {% else %}
-                    Waiting on estimates
-                  {% endif %}
-                </td>
-              </tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      </div>
-    {% else %}
-      <p class="empty">No decisions yet.</p>
-    {% endif %}
   </section>
 
   {% if priors %}

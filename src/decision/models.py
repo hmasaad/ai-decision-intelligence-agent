@@ -111,6 +111,7 @@ class Evidence(BaseModel):
     metric_id: str | None = None
     value: float | None = None
     option_key: str | None = None
+    stance: str = ""
     challenges: str = ""
     limit: float | None = None
 
@@ -119,6 +120,10 @@ class Evidence(BaseModel):
         if self.channel not in CHANNELS:
             names = ", ".join(CHANNELS)
             raise ValueError(f"Evidence {self.id} channel must be one of {names}")
+        if self.stance not in {"", "supports", "contradicts"}:
+            raise ValueError(f"Evidence {self.id} stance must be supports or contradicts")
+        if self.stance and not self.option_key:
+            raise ValueError(f"Evidence {self.id} needs an option to support or contradict")
         if self.challenges not in {"", "downtime", "timeline", "headcount"}:
             raise ValueError(f"Evidence {self.id} challenges an unknown assumption")
         if self.challenges in {"timeline", "headcount"} and self.limit is None:
@@ -248,6 +253,9 @@ class DecisionCase(BaseModel):
     pattern: str = "general"
     decision: str = ""
     objective: str = ""
+    context: str = ""
+    owner: str = ""
+    assumptions: list[str] = Field(default_factory=list)
     constraints: list[Constraint] = Field(default_factory=list)
     metrics: list[MetricSpec] = Field(default_factory=list)
     options: list[Option] = Field(default_factory=list)

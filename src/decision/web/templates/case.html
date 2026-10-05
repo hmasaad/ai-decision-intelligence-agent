@@ -3,7 +3,7 @@
 {% block body %}
   <section class="hero">
     <div>
-      <p class="eyebrow">{{ case.organization }} · {{ case.status.value }}</p>
+      <p class="eyebrow">{{ case.organization }} · {{ case.status.value }}{% if case.owner %} · {{ case.owner }}{% endif %}</p>
       <h1>{{ case.decision }}</h1>
       <p class="mission">{{ case.objective or "Objective not stated." }}</p>
     </div>
@@ -13,11 +13,13 @@
         {% for option in case.options if option.key == case.brief.recommendation_key %}
           {{ option.key }}. {{ option.name }}
         {% endfor %}
-        <small>Confidence {{ case.brief.confidence }}</small>
+        <small>Confidence {{ view.confidence.percent }}{% if view.confidence.word %} · {{ view.confidence.word }}{% endif %}</small>
         {% for item in view.judgments if item.stance_key == "inferred" %}
           <small>{{ item.label }} {{ item.display }} · {{ item.stance }} · {{ item.confidence }}</small>
         {% endfor %}
       </p>
+    {% elif case.status.value == "requested" %}
+      <p class="recommendation waiting">Registered. Analysis has not started.</p>
     {% elif not view.ready %}
       <p class="recommendation waiting">Framed, and not ready to recommend.</p>
     {% endif %}
@@ -29,6 +31,63 @@
   {% if case.reevaluations and case.status.value == "briefed" %}
     <p class="banner">Re-evaluation required. A person needs to review the updated analysis.</p>
   {% endif %}
+
+  <section id="registry" class="panel">
+    <h2>Decision registry</h2>
+    <p class="meta">The stored identity of this decision.</p>
+    <pre class="frame">{{ registry }}</pre>
+    <form class="frame-form" method="post" action="/decisions/{{ case.id }}/registry">
+      {% if case.brief %}
+        <input type="hidden" name="locked" value="brief">
+      {% else %}
+        <label>
+          Question
+          <textarea name="question" rows="2" required>{{ case.request }}</textarea>
+        </label>
+        <label>
+          Goal
+          <input name="goal" value="{{ case.objective }}">
+        </label>
+        <label>
+          Options
+          <textarea name="options" rows="4" placeholder="One option per line">{% for option in case.options %}{{ option.key }}. {{ option.name }}
+{% endfor %}</textarea>
+        </label>
+        <label>
+          Constraints
+          <textarea name="constraints" rows="3" placeholder="One constraint per line">{% for item in case.constraints %}{{ item.statement }}
+{% endfor %}</textarea>
+        </label>
+      {% endif %}
+      <label>
+        Context
+        <textarea name="context" rows="3">{{ case.context }}</textarea>
+      </label>
+      <div class="split">
+        <label>
+          Owner
+          <input name="owner" value="{{ case.owner }}">
+        </label>
+        <label>
+          Status
+          <select name="status">
+            {% if case.status.value not in statuses %}
+              <option value="{{ case.status.value }}" selected>{{ case.status.value }}</option>
+            {% endif %}
+            {% for item in statuses %}
+              <option value="{{ item }}" {% if item == case.status.value %}selected{% endif %}>{{ item }}</option>
+            {% endfor %}
+          </select>
+        </label>
+      </div>
+      <label>
+        Assumptions
+        <textarea name="assumptions" rows="3" placeholder="One assumption per line">{% for item in case.assumptions %}{{ item }}
+{% endfor %}</textarea>
+      </label>
+      <button class="button button-primary" type="submit">Update this decision</button>
+    </form>
+  </section>
 
   <ol class="stepper">
     {% for step in view.progress %}
@@ -51,16 +110,26 @@
         <li class="{% if source.count %}filled{% endif %}">{{ source.label }}{% if source.count %} · {{ source.count }}{% endif %}</li>
       {% endfor %}
     </ul>
+    {% if view.balance %}
+      <ul class="balance">
+        {% for line in view.balance %}
+          <li>{{ line }}</li>
+        {% endfor %}
+      </ul>
+    {% endif %}
     {% if view.claims %}
       <ul class="evidence">
         {% for item in view.claims %}
-          <li>
+          <li class="reliability-{{ item.reliability_key }}">
             <p class="claim">{{ item.claim }}</p>
             <dl class="provenance">
               <div><dt>Source</dt><dd>{{ item.source }}</dd></div>
+              <div><dt>Claim</dt><dd>{{ item.claim }}</dd></div>
               <div><dt>Timestamp</dt><dd>{{ item.timestamp }}</dd></div>
-              <div><dt>Confidence</dt><dd>{{ item.confidence }}</dd></div>
+              <div><dt>Reliability</dt><dd>{{ item.reliability }}</dd></div>
               <div><dt>Freshness</dt><dd>{{ item.freshness }}</dd></div>
+              <div><dt>Confidence</dt><dd>{{ item.confidence }}</dd></div>
+              <div><dt>Supports / contradicts</dt><dd>{{ item.stance }}</dd></div>
             </dl>
           </li>
         {% endfor %}
@@ -136,6 +205,79 @@
     {% else %}
       <p class="meta">No options yet.</p>
     {% endif %}
+    <h3>Same criteria</h3>
+    <p class="meta">{{ view.comparison.basis }}</p>
+    <ul>
+      {% for slot in view.comparison.slots %}
+        <li>{{ slot.label }}: {{ slot.value }}</li>
+      {% endfor %}
+      {% if view.comparison.also %}
+        <li>Also on the table: {{ view.comparison.also }}</li>
+      {% endif %}
+    </ul>
+    {% if view.comparison.rows %}
+      <div class="table-wrap">
+        <table class="summary">
+          <thead>
+            <tr>
+              <th>Option</th>
+              <th>Cost</th>
+              <th>Time</th>
+              <th>Risk</th>
+              <th>Expected value</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in view.comparison.rows %}
+              <tr {% if row.recommended %}class="chosen"{% endif %}>
+                <td>
+                  <strong>{{ row.label }}</strong>
+                  {% if row.note %}<span class="meta">{{ row.note }}</span>{% endif %}
+                </td>
+                <td>{{ row.cost }}</td>
+                <td>{{ row.time }}</td>
+                <td>{{ row.risk }}</td>
+                <td>{{ row.value }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% endif %}
+    <p>{{ view.comparison.reading }}</p>
+  </section>
+
+  <section id="assumptions" class="panel">
+    <h2>Assumption tracker</h2>
+    <p class="meta">Each assumption is tied to the option it holds, and that option to the recommendation.</p>
+    {% if view.assumptions %}
+      {% for item in view.assumptions %}
+        <article class="assumption">
+          <h3>{{ item.statement }}</h3>
+          <dl class="provenance">
+            <div><dt>Confidence</dt><dd>{{ item.confidence }}</dd></div>
+            <div><dt>Impact if wrong</dt><dd>{{ item.impact }}. {{ item.impact_detail }}</dd></div>
+            <div><dt>Evidence</dt><dd>{{ item.evidence }}</dd></div>
+          </dl>
+          <ol class="cascade">
+            <li>
+              <span>Assumption</span>
+              <strong>{{ item.statement }}</strong>
+            </li>
+            <li>
+              <span>Option</span>
+              <strong>{{ item.option_name }}</strong>
+            </li>
+            <li>
+              <span>Recommendation</span>
+              <strong>{{ item.recommendation }}</strong>
+            </li>
+          </ol>
+        </article>
+      {% endfor %}
+    {% else %}
+      <p class="meta">Nothing is recommended yet, so no assumption is driving a choice.</p>
+    {% endif %}
   </section>
 
   <section id="simulate" class="panel">
@@ -199,6 +341,43 @@
     {% endif %}
   </section>
 
+  <section id="engine" class="panel">
+    <h2>Scenario engine</h2>
+    <p class="meta">Best, expected, and worst are the stored estimate. The chain is what happens when the assumption this decision is sitting on changes.</p>
+    <h3>{{ view.engine.option }}</h3>
+    <div class="case-tree">
+      {% for item in view.engine.cases %}
+        <div>
+          <span>{{ item.name }}</span>
+          <strong>{{ item.headline }}</strong>
+          {% if item.note %}<p>{{ item.note }}</p>{% endif %}
+        </div>
+      {% endfor %}
+    </div>
+    <h3>Variables</h3>
+    <dl class="chain">
+      {% for item in view.engine.variables %}
+        <dt>{{ item.name }}</dt>
+        <dd>{{ item.detail }}</dd>
+      {% endfor %}
+    </dl>
+    <h3>What happens if our assumptions change?</h3>
+    {% if view.engine.ready %}
+      <ol class="cascade">
+        {% for step in view.engine.chain %}
+          <li>
+            <span>{{ step.label }}</span>
+            <strong>{{ step.change }}</strong>
+            {% if step.note %}<p>{{ step.note }}</p>{% endif %}
+          </li>
+        {% endfor %}
+      </ol>
+      <p>{{ view.engine.reading }}</p>
+    {% else %}
+      <p class="meta">{{ view.engine.reading }}</p>
+    {% endif %}
+  </section>
+
   <section id="whatif" class="panel">
     <h2>What if this assumption changes?</h2>
     {% if view.whatif %}
@@ -240,7 +419,36 @@
   </section>
 
   <section id="risk" class="panel">
-    <h2>Risk &amp; uncertainty</h2>
+    <h2>Risk &amp; confidence</h2>
+    <p class="meta">The recommendation names an option and a measured confidence.</p>
+    <p class="recommendation">
+      <span>Recommendation</span>
+      {{ view.confidence.recommendation }}
+      <small>Confidence {{ view.confidence.percent }}{% if view.confidence.word %} · {{ view.confidence.word }}{% endif %}</small>
+    </p>
+    {% if view.confidence.basis %}<p>{{ view.confidence.basis }}</p>{% endif %}
+    <h3>Main risks</h3>
+    {% if view.confidence.risks %}
+      <ol>
+        {% for risk in view.confidence.risks %}
+          <li>
+            <strong>{{ risk.title }}</strong>
+            {% if risk.detail %}<p>{{ risk.detail }}</p>{% endif %}
+          </li>
+        {% endfor %}
+      </ol>
+    {% else %}
+      <p class="meta">None recorded.</p>
+    {% endif %}
+    <h3>{{ view.confidence.below }}</h3>
+    {% if view.confidence.conditions %}
+      <ul>
+        {% for item in view.confidence.conditions %}
+          <li>{{ item }}</li>
+        {% endfor %}
+      </ul>
+    {% endif %}
+    <h3>How sure each figure is</h3>
     {% if view.judgments %}
       <ul class="judgments">
         {% for item in view.judgments %}
@@ -350,6 +558,25 @@
               {% for key, label in channels.items() %}
                 <option value="{{ key }}">{{ label }}</option>
               {% endfor %}
+            </select>
+          </label>
+        </div>
+        <div class="split">
+          <label>
+            Option
+            <select name="option_key">
+              <option value="">Not filed against an option</option>
+              {% for option in case.options %}
+                <option value="{{ option.key }}">{{ option.key }}. {{ option.name }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <label>
+            Stance
+            <select name="stance">
+              <option value="">Not filed</option>
+              <option value="supports">Supports</option>
+              <option value="contradicts">Contradicts</option>
             </select>
           </label>
         </div>
@@ -507,5 +734,81 @@
     </ul>
     <h3>What did we learn?</h3>
     <p>{{ view.memory.learned }}</p>
+  </section>
+
+  <section id="graph" class="panel">
+    <h2>Decision graph</h2>
+    <p class="meta">Evidence supports the assumptions. The constraints admit the option. That option’s outcome is why the recommendation was reached.</p>
+    {% if view.reason.ready %}
+      <div class="reason">
+        <div class="reason-band">
+          <article>
+            <span>Evidence</span>
+            {% for node in view.reason.evidence %}
+              <strong>{{ node.label }}</strong>
+              {% if node.detail %}<p>{{ node.detail }}</p>{% endif %}
+            {% endfor %}
+          </article>
+          <span class="reason-arrow" aria-hidden="true">↓</span>
+          <article>
+            <span>Assumption</span>
+            {% for node in view.reason.assumptions %}
+              <strong>{{ node.label }}</strong>
+              {% if node.detail %}<p>{{ node.detail }}</p>{% endif %}
+            {% endfor %}
+          </article>
+        </div>
+        <div class="reason-band">
+          <article>
+            <span>Constraint</span>
+            {% for node in view.reason.constraints %}
+              <strong>{{ node.label }}</strong>
+              {% if node.detail %}<p>{{ node.detail }}</p>{% endif %}
+            {% endfor %}
+          </article>
+          <span class="reason-arrow" aria-hidden="true">→</span>
+          <article>
+            <span>Option</span>
+            <strong>{{ view.reason.option.label }}</strong>
+            {% if view.reason.option.detail %}<p>{{ view.reason.option.detail }}</p>{% endif %}
+          </article>
+        </div>
+        <div class="reason-spine">
+          <span class="reason-arrow" aria-hidden="true">↓</span>
+          <article>
+            <span>Outcome</span>
+            <strong>{{ view.reason.outcome.label }}</strong>
+            {% if view.reason.outcome.detail %}<p>{{ view.reason.outcome.detail }}</p>{% endif %}
+          </article>
+          <span class="reason-arrow" aria-hidden="true">↓</span>
+          <article>
+            <span>Decision</span>
+            <strong>{{ view.reason.decision.label }}</strong>
+            {% if view.reason.decision.detail %}<p>{{ view.reason.decision.detail }}</p>{% endif %}
+          </article>
+        </div>
+        <p>{{ view.reason.because }}</p>
+      </div>
+    {% else %}
+      <p class="meta">{{ view.reason.empty }}</p>
+    {% endif %}
+    <form class="frame-form" method="get" action="/decisions/{{ case.id }}">
+      <label>
+        Ask the graph
+        <input name="graph" value="{{ request.query_params.get('graph', '') }}" placeholder="Why did you reach this recommendation?">
+      </label>
+      <button class="button button-primary" type="submit">Trace it</button>
+    </form>
+    <ul>
+      <li><a href="/decisions/{{ case.id }}?graph=Why+did+you+reach+this+recommendation%3F#graph">Why did you reach this recommendation?</a></li>
+      <li><a href="/decisions/{{ case.id }}?graph=Which+assumptions+are+driving+this+decision%3F#assumptions">Which assumptions are driving this decision?</a></li>
+      <li><a href="/decisions/{{ case.id }}?graph=Which+assumptions+are+responsible+for+this+decision%3F#graph">Which assumptions are responsible for this decision?</a></li>
+      <li><a href="/decisions/{{ case.id }}?graph=What+evidence+would+invalidate+it%3F#graph">What evidence would invalidate it?</a></li>
+      <li><a href="/decisions/{{ case.id }}?graph=Which+decisions+depend+on+the+no-downtime+assumption%3F#graph">Which decisions depend on the no-downtime assumption?</a></li>
+      <li><a href="/decisions/{{ case.id }}?graph=What+happens+if+this+constraint+changes%3F#graph">What happens if this constraint changes?</a></li>
+    </ul>
+    {% if graph_answer %}
+      <pre class="frame brief">{{ graph_answer }}</pre>
+    {% endif %}
   </section>
 {% endblock %}

@@ -14,7 +14,8 @@
     <div class="site-header-inner">
       <a class="wordmark" href="/">AI Decision Intelligence</a>
       <nav class="nav">
-        <a href="/" {% if request.url.path == '/' %}aria-current="page"{% endif %}>Decisions</a>
+        <a href="/" {% if request.url.path == '/' %}aria-current="page"{% endif %}>Agent</a>
+        <a href="/recall" {% if request.url.path == '/recall' %}aria-current="page"{% endif %}>Memory</a>
       </nav>
     </div>
   </header>

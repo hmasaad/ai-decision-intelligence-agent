@@ -15,6 +15,8 @@ def test_frame_form_reproduces_the_example(tmp_path: Path, monkeypatch):
     empty = client.get("/")
     assert empty.status_code == 200
     assert "No decisions yet." in empty.text
+    assert "Manage the decisions in this workspace." in empty.text
+    assert "Waiting for a person" in empty.text
 
     framed = client.post(
         "/frame",
@@ -46,6 +48,11 @@ def test_demo_can_be_approved_tracked_and_learned(tmp_path: Path, monkeypatch):
     client = _client(tmp_path, monkeypatch)
     loaded = client.post("/demo", follow_redirects=True)
     assert loaded.status_code == 200
+    board = client.get("/")
+    assert "Should the billing service migrate?" in board.text
+    assert "briefed" in board.text
+    assert "B. Partial migration" in board.text
+    assert "58% · medium" in board.text
     assert "Should the billing service migrate?" in loaded.text
     assert "B. Partial migration" in loaded.text
     assert "$74,400 benefit" in loaded.text
@@ -58,6 +65,14 @@ def test_demo_can_be_approved_tracked_and_learned(tmp_path: Path, monkeypatch):
     assert "High · 0.92" in loaded.text
     assert "Timestamp" in loaded.text
     assert "Freshness" in loaded.text
+    assert "Reliability" in loaded.text
+    assert "Supports / contradicts" in loaded.text
+    assert "10 claims are evidence. 2 claims are opinion." in loaded.text
+    assert "3 pieces of evidence support B. Partial migration, while 0 contradict it." in loaded.text
+    assert "Partial migration is estimated at 6 weeks." in loaded.text
+    assert "Impact if wrong" in loaded.text
+    assert "Architecture review, 58%." in loaded.text
+    assert "while 2 contradict it." in loaded.text
     assert "Status quo" in loaded.text
     assert "Needs 5 engineers and 3 are available." in loaded.text
     assert "Requires production downtime." in loaded.text
@@ -163,3 +178,71 @@ def test_demo_can_be_approved_tracked_and_learned(tmp_path: Path, monkeypatch):
         params={"q": "Why did we choose PostgreSQL instead of DynamoDB?"},
     )
     assert "No stored decision chose those options." in unknown.text
+
+
+def test_register_creates_a_decision_that_can_be_inspected(tmp_path: Path, monkeypatch):
+    client = _client(tmp_path, monkeypatch)
+    created = client.post(
+        "/register",
+        data={"question": "Should we migrate our Flutter app to architecture X?"},
+        follow_redirects=True,
+    )
+    assert created.status_code == 200
+    assert "Should we migrate our Flutter app to architecture X?" in created.text
+    assert "Registered. Analysis has not started." in created.text
+    assert "├── Goal" in created.text
+    assert "Not recorded." in created.text
+    assert "Do nothing" not in created.text
+
+    updated = client.post(
+        "/decisions/should-we-migrate-our-flutter-app-to-architecture-x/registry",
+        data={
+            "question": "Should we migrate our Flutter app to architecture X?",
+            "goal": "Keep the Flutter app shippable during the move.",
+            "context": "The app is in production.",
+            "owner": "Mobile",
+            "options": "Stay on the current architecture\nMigrate to architecture X",
+            "constraints": "No rewrite of the payment screens.",
+            "assumptions": "Architecture X can host the current screens.",
+            "status": "requested",
+        },
+        follow_redirects=True,
+    )
+    assert "Mobile" in updated.text
+    assert "A. Stay on the current architecture" in updated.text
+    assert "B. Migrate to architecture X" in updated.text
+
+    listed = client.get("/")
+    assert "Should we migrate our Flutter app to architecture X?" in listed.text
+    assert "Mobile" in listed.text
+
+
+def test_the_graph_answers_from_the_billing_page(tmp_path: Path, monkeypatch):
+    client = _client(tmp_path, monkeypatch)
+    client.post("/demo", follow_redirects=True)
+    page = client.get(
+        "/decisions/billing-migration",
+        params={"graph": "Which assumptions are responsible for this decision?"},
+    )
+    assert "Decision graph" in page.text
+    assert "Same criteria" in page.text
+    assert "What happens if our assumptions change?" in page.text
+    assert "Confidence is 58%, below 60%." in page.text
+    assert "Migration causes production regression" in page.text
+    assert "Engineering capacity drops below 3 engineers." in page.text
+    assert "clearly the best" not in page.text
+    assert "ROI decreases" in page.text
+    assert "Customer adoption" in page.text
+    assert "B. Partial migration" in page.text
+    assert "C. Full migration has the highest expected value, $103,200 benefit." in page.text
+    assert "Architecture review, 58%." in page.text
+    assert "$74,400 benefit" in page.text
+    why = client.get(
+        "/decisions/billing-migration",
+        params={"graph": "Why did you reach this recommendation?"},
+    )
+    assert "Constraint → Option" in why.text
+    assert "because this path reaches it." in why.text
+    assert "No evidence on record supports this assumption." in page.text
+    assert "Rests on Staffing plan." in page.text
+    assert "Blocks Full migration." in page.text

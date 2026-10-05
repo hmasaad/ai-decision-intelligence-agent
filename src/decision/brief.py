@@ -3,7 +3,7 @@
 from decision.models import Band, DecisionBrief, DecisionCase, Option, Risk, Scenario
 from decision.simulate import recommend
 from decision.text import plain
-from decision.uncertainty import judgments
+from decision.uncertainty import judgments, return_confidence
 
 
 def write_brief(
@@ -157,9 +157,11 @@ def _text(
     if chosen is None:
         review = "No feasible option is ready for review."
     else:
+        measured = return_confidence(case, chosen.key)
+        percent = f", {round(measured * 100)}%" if measured is not None else ""
         review = (
             f"For review: {chosen.key}. {chosen.name}. "
-            f"Confidence is {confidence}. A person makes the call."
+            f"Confidence is {confidence}{percent}. A person makes the call."
         )
     uncertainty = f"\n{uncertainties[0]}" if uncertainties else ""
     return (
