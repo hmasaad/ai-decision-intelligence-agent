@@ -156,6 +156,11 @@ def build_graph(case: DecisionCase) -> Graph:
         if case.review_action == "approved":
             who = case.approved_by or "a person whose name was not recorded"
             decision_detail += f" Approved by {who}."
+        elif case.review_action == "modified" and case.human_choice:
+            picked = case.option(case.human_choice)
+            who = case.approved_by or "a person whose name was not recorded"
+            choice = f"{picked.key}. {picked.name}" if picked is not None else case.human_choice
+            decision_detail += f" {who} chose {choice}."
     nodes.append(Node("decision", "decision", case.decision or "Not stated.", decision_detail))
     if case.risks:
         edges.append(Edge(f"risk:{len(case.risks) - 1}", "decision", "informs"))
@@ -210,7 +215,11 @@ def render_graph(case: DecisionCase) -> str:
 
 
 def ask(cases: list[DecisionCase], question: str, focus_id: str = "") -> str:
-    """Answer one of the four graph questions from stored decisions."""
+    """Answer a graph question from stored decisions.
+
+    The first four are why the decision was made, which evidence supports it,
+    which assumptions it depends on, and what would cause it to change.
+    """
 
     asked = " ".join(question.split())
     if not asked:
@@ -223,10 +232,26 @@ def ask(cases: list[DecisionCase], question: str, focus_id: str = "") -> str:
         from decision.reason import why
 
         return why(focus, asked)
+    if _is_else_changes(text):
+        from decision.impact import changes
+
+        return changes(focus, cases, asked)
+    if _is_could_invalidate(text):
+        from decision.impact import invalidates
+
+        return invalidates(focus, cases, asked)
+    if _is_support(text):
+        return _evidence_answer(focus, asked)
     if "assumption" in text and "driving" in text:
         from decision.assumptions import answer as driving_answer
 
         return driving_answer(focus, asked)
+    if _is_assumption_dependency(text):
+        from decision.assumptions import answer as driving_answer
+
+        return driving_answer(focus, asked)
+    if _is_cause(text):
+        return _cause_answer(focus, asked)
     if _is_responsible(text):
         return _responsible_answer(focus, asked)
     if _is_invalidate(text):
@@ -240,10 +265,10 @@ def ask(cases: list[DecisionCase], question: str, focus_id: str = "") -> str:
     if _is_change(text):
         return _change_answer(focus, asked)
     return (
-        "The graph can say why a recommendation was reached, "
-        "which assumptions are responsible for a decision, "
-        "what evidence would invalidate it, which decisions depend on an assumption, "
-        "and what happens if a constraint changes.\n"
+        "The graph answers why this decision was made, "
+        "which evidence supports it, "
+        "which assumptions it depends on, "
+        "and what would cause the decision to change.\n"
     )
 
 
@@ -257,6 +282,156 @@ def responsible_constraints(case: DecisionCase) -> list[Constraint]:
     for _option, expected in _higher_blocked(case, chosen):
         kinds.update(expected.block_codes)
     return [item for item in case.constraints if item.kind in kinds]
+
+
+def _evidence_answer(case: DecisionCase | None, asked: str) -> str:
+    if case is None:
+        return "No stored decision is available to trace.\n"
+    if case.brief is None or not case.brief.recommendation_key:
+        return "Nothing is recommended yet, so no evidence is supporting a choice.\n"
+    chosen = case.option(case.brief.recommendation_key)
+    if chosen is None:
+        return "Nothing is recommended yet, so no evidence is supporting a choice.\n"
+    from decision.assumptions import driving
+    from decision.evidence import relations, reliability
+
+    supports = [
+        item
+        for item, option, relation in relations(case)
+        if option.key == chosen.key and relation == "supports"
+    ]
+    lines = [
+        asked,
+        "",
+        case.decision or "Decision",
+        "",
+        f"{chosen.key}. {chosen.name} is the recommendation. This evidence supports it.",
+        "",
+    ]
+    if supports:
+        contradicts = [
+            item
+            for item, option, relation in relations(case)
+            if option.key == chosen.key and relation == "contradicts"
+        ]
+        lines.append(
+            f"{_pieces(len(supports))} of evidence {_verb(len(supports))} "
+            f"{chosen.key}. {chosen.name}, while {len(contradicts)} contradict it."
+        )
+        for item in supports:
+            opinion = " This claim is opinion." if reliability(item) == "opinion" else ""
+            lines.append(f"• {item.source}, {_percent(item.confidence)}. {item.statement}{opinion}")
+        lines.append("")
+    else:
+        lines.append(f"No evidence is filed for {chosen.key}. {chosen.name}.")
+        lines.append("")
+    filed = {item.source.lower() for item in supports}
+    extra: list[str] = []
+    gaps: list[str] = []
+    for item in driving(case):
+        if item.evidence.strip() == "No evidence is on record.":
+            gaps.append(item.statement)
+            continue
+        for line in item.evidence_lines:
+            if any(line.lower().startswith(source) for source in filed):
+                continue
+            opinion = " This claim is opinion." if "opinion" in line.lower() else ""
+            extra.append(f"• {line} Supports {item.statement}{opinion}")
+    if extra:
+        lines.append("These claims support an assumption the decision depends on.")
+        lines.extend(extra)
+        lines.append("")
+    for statement in gaps:
+        lines.append(f"{statement} No evidence is on record for this assumption.")
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def _cause_answer(case: DecisionCase | None, asked: str) -> str:
+    if case is None:
+        return "No stored decision is available to trace.\n"
+    if not case.scenarios:
+        return "That decision has no estimates, so a change cannot be traced yet.\n"
+    if case.brief is None or not case.brief.recommendation_key:
+        return "Nothing is recommended yet, so there is no decision to change.\n"
+    chosen = case.option(case.brief.recommendation_key)
+    if chosen is None:
+        return "Nothing is recommended yet, so there is no decision to change.\n"
+    lines = [
+        asked,
+        "",
+        case.decision or "Decision",
+        "",
+        f"{chosen.key}. {chosen.name} is the recommendation.",
+        "",
+    ]
+    expected = case.scenario(chosen.key, "expected")
+    held = _higher_blocked(case, expected)
+    if held:
+        option, scenario = held[0]
+        phrases = [_block_phrase(item) for item in case.constraints if item.kind in scenario.block_codes]
+        lines.append(f"{option.name} scores higher and is blocked by {_join(phrases)}.")
+        lines.append(f"One of them leaves {option.name} blocked, so that change leaves the recommendation in place.")
+        lines.append("")
+    moves = _moves(case)
+    if moves:
+        lines.append("These changes move the recommendation.")
+        lines.extend(f"• {item}" for item in moves)
+    else:
+        lines.append("No probed change moves this recommendation.")
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def _moves(case: DecisionCase) -> list[str]:
+    lines: list[str] = []
+    opened = _opening_whatif(case)
+    if opened is not None and opened.changed:
+        lines.append(_cause_line(opened))
+    engineers = _limit(case, "headcount")
+    weeks = _limit(case, "timeline")
+    if engineers is not None and engineers > 1 and weeks is not None:
+        shorter = answer(case, engineers=engineers - 1, from_engineers=engineers, from_weeks=weeks)
+        if shorter is not None and shorter.changed:
+            timeline = next((step.after for step in shorter.steps if step.label == "Timeline"), "")
+            derived = f" The timeline derives to {timeline}." if timeline else ""
+            lines.append(
+                f"Engineering capacity drops from {plain(engineers)} to {plain(engineers - 1)} engineers."
+                f"{derived} The recommendation moves to {shorter.recommendation_after}."
+            )
+    return lines
+
+
+def _block_phrase(constraint: Constraint) -> str:
+    if constraint.kind == "timeline":
+        return f"the {constraint.statement}"
+    text = constraint.statement
+    if not text:
+        return text
+    return text[:1].lower() + text[1:]
+
+
+def _cause_line(item: WhatIf) -> str:
+    prefix = "what happens if "
+    body = item.question
+    if body.lower().startswith(prefix):
+        body = body[len(prefix):]
+        body = body[:1].upper() + body[1:]
+    if body.endswith("?"):
+        body = body[:-1] + "."
+    return f"{body} The recommendation moves to {item.recommendation_after}."
+
+
+def _pieces(count: int) -> str:
+    if count == 1:
+        return "1 piece"
+    return f"{count} pieces"
+
+
+def _verb(count: int) -> str:
+    return "supports" if count == 1 else "support"
+
+
+def _percent(value: float) -> str:
+    return f"{round(value * 100)}%"
 
 
 def _responsible_answer(case: DecisionCase | None, asked: str) -> str:
@@ -516,8 +691,32 @@ def _focus(cases: list[DecisionCase], focus_id: str) -> DecisionCase | None:
     return briefed[-1] if briefed else (cases[-1] if cases else None)
 
 
+def _is_else_changes(text: str) -> bool:
+    return "what else" in text and "change" in text
+
+
+def _is_could_invalidate(text: str) -> bool:
+    if "invalidat" not in text:
+        return False
+    return any(word in text for word in ("goal", "plan", "assumption", "decisions"))
+
+
 def _is_why(text: str) -> bool:
-    return "why" in text and ("recommend" in text or "reach" in text)
+    return "why" in text and ("recommend" in text or "reach" in text or "made" in text)
+
+
+def _is_support(text: str) -> bool:
+    return "evidence" in text and "support" in text and "invalidat" not in text
+
+
+def _is_assumption_dependency(text: str) -> bool:
+    if "assumption" not in text or "depend" not in text:
+        return False
+    return "which decisions" not in text and "decisions depend" not in text
+
+
+def _is_cause(text: str) -> bool:
+    return "cause" in text and "change" in text
 
 
 def _is_responsible(text: str) -> bool:

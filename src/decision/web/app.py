@@ -13,6 +13,7 @@ from decision.agent import DecisionAgent
 from decision.confidence import confidence_label
 from decision.errors import DecisionError
 from decision.graph import ask as ask_graph
+from decision.impact import answer as answer_impact
 from decision.memory import recall
 from decision.models import CHANNELS, Evidence, Stage
 from decision.paths import home as workspace_home
@@ -119,12 +120,14 @@ def create_app() -> FastAPI:
         weeks: str = "",
         downtime: str = "",
         graph: str = "",
+        impact: str = "",
     ) -> HTMLResponse:
         agent = DecisionAgent()
         case = agent.get(case_id)
         if case is None:
             raise HTTPException(status_code=404)
-        view = dossier(case)
+        stored = agent.cases()
+        view = dossier(case, stored)
         if any(value.strip() for value in (from_engineers, engineers, from_weeks, weeks, downtime)):
             view["whatif"] = whatif_view(
                 answer(
@@ -144,7 +147,8 @@ def create_app() -> FastAPI:
                 "view": view,
                 "priors": agent.priors(case.pattern),
                 "channels": CHANNELS,
-                "graph_answer": ask_graph(agent.cases(), graph, case.id) if graph.strip() else "",
+                "graph_answer": ask_graph(stored, graph, case.id) if graph.strip() else "",
+                "impact_answer": answer_impact(stored, impact, case.id) if impact.strip() else "",
                 "registry": render_registry(case),
                 "statuses": [item.value for item in OPEN_STATUSES],
                 "error": error,
@@ -228,8 +232,12 @@ def create_app() -> FastAPI:
         action: str = Form(...),
         note: str = Form(""),
         approver: str = Form(""),
+        option_key: str = Form(""),
     ) -> RedirectResponse:
-        return _act(case_id, lambda agent: agent.review(case_id, action, note, by=approver))
+        return _act(
+            case_id,
+            lambda agent: agent.review(case_id, action, note, by=approver, option_key=option_key),
+        )
 
     @app.post("/decisions/{case_id}/steps/{step_id}")
     def finish_step(case_id: str, step_id: str) -> RedirectResponse:
@@ -254,6 +262,14 @@ def create_app() -> FastAPI:
     @app.post("/decisions/{case_id}/learn")
     def learn_case(case_id: str) -> RedirectResponse:
         return _act(case_id, lambda agent: agent.learn(case_id))
+
+    @app.post("/decisions/{case_id}/revision")
+    def revision(
+        case_id: str,
+        note: str = Form(""),
+        approver: str = Form(""),
+    ) -> RedirectResponse:
+        return _act(case_id, lambda agent: agent.accept_revision(case_id, note, by=approver))
 
     return app
 

@@ -1,6 +1,8 @@
 import pytest
 
+from decision.approval import render_gate
 from decision.demo import OBSERVED, billing_case
+from decision.outcomes import render_scorecard
 from decision.errors import DecisionError
 from decision.loop import apply_review, complete_step, learn, prepare, record_outcomes
 from decision.models import Stage
@@ -40,9 +42,15 @@ def test_partial_migration_is_the_feasible_winner():
     assert "DECISION" in case.brief.text
     assert "Human approval required" in case.brief.text
     assert "B. Partial migration" in case.brief.text
-    assert "Best:      $91,200 benefit" in case.brief.text
-    assert "Can the team allocate 2 additional engineers?" in case.brief.text
-    assert "Is the downtime requirement negotiable?" in case.brief.text
+    assert "Confidence is medium, 58%." in case.brief.text
+    assert "34% lower" in case.brief.text
+    assert "$74,400 benefit" in case.brief.text
+    assert "Engineering capacity. Full migration needs 5 engineers and 3 are available." in case.brief.text
+    assert "The recommendation moves to C. Full migration." in case.brief.text
+    assert "The recommendation moves to D. Managed billing service." in case.brief.text
+    assert "Put a strangler facade in front of the service." in case.brief.text
+    assert case.brief.change_conditions[0] == "Can the team allocate 2 additional engineers?"
+    assert "Is the downtime requirement negotiable?" in case.brief.change_conditions
 
 
 def test_approval_gates_execution_and_outcomes():
@@ -56,6 +64,7 @@ def test_approval_gates_execution_and_outcomes():
 
     approved = apply_review(case, "approved", "Ship the invoice slice", "2026-10-02T00:00:00+00:00")
     assert approved.status is Stage.executing
+    assert approved.human_choice == "B"
     assert [step.id for step in approved.execution] == ["facade", "slice", "cutover"]
     with pytest.raises(DecisionError):
         record_outcomes(approved, OBSERVED)
@@ -72,3 +81,71 @@ def test_approval_gates_execution_and_outcomes():
     assert any("25%" in line for line in learned.lesson.statements)
     assert any("stayed inside the 8-week timeline" in line for line in learned.lesson.statements)
     assert any(prior.metric_id == "deploy_time" for prior in priors)
+
+
+def test_modify_records_the_persons_choice_and_leaves_the_recommendation():
+    case = _ready()
+    with pytest.raises(DecisionError, match="Record the reasoning"):
+        apply_review(case, "modified", "", "2026-10-02T00:00:00+00:00", "Platform", option_key="C")
+    with pytest.raises(DecisionError, match="That is the recommendation"):
+        apply_review(
+            case,
+            "modified",
+            "Take the same option.",
+            "2026-10-02T00:00:00+00:00",
+            "Platform",
+            option_key="B",
+        )
+    modified = apply_review(
+        case,
+        "modified",
+        "The downtime window is open this quarter.",
+        "2026-10-02T00:00:00+00:00",
+        "Platform",
+        option_key="C",
+    )
+    assert modified.brief is not None
+    assert modified.brief.recommendation_key == "B"
+    assert modified.human_choice == "C"
+    assert modified.review_note == "The downtime window is open this quarter."
+    assert modified.status is Stage.executing
+    assert [step.id for step in modified.execution] == ["staff", "window", "extract"]
+    text = render_gate(modified)
+    assert "Agent analyzes" in text
+    assert "Agent recommends" in text
+    assert "B. Partial migration." in text
+    assert "Human reviews" in text
+    assert "Approve / Reject / Modify" in text
+    assert "Modified. C. Full migration." in text
+    assert "The agent recommended B. Partial migration." in text
+    assert "Reasoning: The downtime window is open this quarter." in text
+    assert "Needs 5 engineers and 3 are available." in text
+    assert "The plan follows the option the person chose." in text
+    assert "clearly the best" not in text
+
+
+def test_the_outcome_compares_cost_timeline_and_return_with_what_happened():
+    case = _ready()
+    before = render_scorecard(case)
+    assert "Cost      $12,200 per month" in before
+    assert "Timeline  6 weeks" in before
+    assert "ROI       $74,400 benefit" in before
+    assert "Not recorded." in before
+    approved = apply_review(case, "approved", "Ship the invoice slice", "2026-10-02T00:00:00+00:00")
+    for step in list(approved.execution):
+        approved = complete_step(approved, step.id)
+    tracked = record_outcomes(approved, OBSERVED)
+    text = render_scorecard(tracked)
+    assert "Cost      $12,800 per month" in text
+    assert "Timeline  7 weeks" in text
+    assert "ROI       $67,200 benefit" in text
+    assert "Variance\n+5%" in text
+    assert "Variance\n+17%" in text
+    assert "Variance\n-10%" in text
+    assert "Why?" in text
+    assert "Architecture review" in text
+    assert "Platform retrospective" in text
+    assert "Inferred from the infrastructure bill." in text
+    assert "The return moved from $74,400 benefit to $67,200 benefit." in text
+    assert "$100,000" not in text
+    assert "$180,000" not in text

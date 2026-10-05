@@ -17,10 +17,15 @@ from decision.evidence import render_claims
 from decision.text import render_frame
 from decision.graph import ask as ask_graph
 from decision.graph import render_graph
+from decision.dependencies import render_dependencies
+from decision.impact import answer as answer_impact
+from decision.impact import render_impact
 from decision.reason import render_map
 from decision.memory import recall
 from decision.models import Evidence, Stage
-from decision.reevaluate import payments_regulation, render_review
+from decision.approval import render_gate
+from decision.outcomes import render_scorecard
+from decision.reevaluate import payments_regulation, render_watch
 from decision.registry import render_registry
 from decision.whatif import answer, posed, render_whatif
 
@@ -81,9 +86,10 @@ def main(argv: list[str] | None = None) -> int:
 
     review = commands.add_parser("review", help="Record a human decision")
     review.add_argument("decision_id")
-    review.add_argument("action", choices=["approved", "rejected", "deferred"])
-    review.add_argument("--note", default="")
-    review.add_argument("--by", default="", help="Who approved the decision")
+    review.add_argument("action", choices=["approved", "rejected", "deferred", "modified"])
+    review.add_argument("--note", default="", help="The person's reasoning")
+    review.add_argument("--by", default="", help="Who made the decision")
+    review.add_argument("--option", default="", help="Option key when the person modifies the recommendation")
 
     step = commands.add_parser("step", help="Mark an execution step done")
     step.add_argument("decision_id")
@@ -110,6 +116,13 @@ def main(argv: list[str] | None = None) -> int:
     traced = commands.add_parser("graph", help="Show why a recommendation was reached, or ask the graph")
     traced.add_argument("--decision", default="", help="Decision to trace")
     traced.add_argument("question", nargs="*", help="A question for the graph")
+
+    linked = commands.add_parser("dependencies", help="Show how stored decisions depend on each other")
+    linked.add_argument("--decision", default="", help="Decision to map")
+
+    affected = commands.add_parser("impact", help="Show what a decision affects before it is executed")
+    affected.add_argument("--decision", default="", help="Decision to map")
+    affected.add_argument("question", nargs="*", help="What else changes, or what this could invalidate")
 
     incoming = commands.add_parser("evidence", help="Add evidence and re-check the decision")
     incoming.add_argument("decision_id")
@@ -233,8 +246,16 @@ def _dispatch(agent: DecisionAgent, args: argparse.Namespace) -> int:
         print(render_frame(case), end="")
         return 0
     if args.command == "review":
-        case = agent.review(args.decision_id, args.action, args.note, by=args.by)
+        case = agent.review(
+            args.decision_id,
+            args.action,
+            args.note,
+            by=args.by,
+            option_key=args.option,
+        )
         print(f"{case.id} is now {case.status.value}.")
+        print()
+        print(render_gate(case), end="")
         return 0
     if args.command == "step":
         case = agent.complete_step(args.decision_id, args.step_id)
@@ -244,6 +265,8 @@ def _dispatch(agent: DecisionAgent, args: argparse.Namespace) -> int:
     if args.command == "outcome":
         case = agent.record_outcomes(args.decision_id, _actuals(args.actuals))
         print(f"{case.id} is now {case.status.value}.")
+        print()
+        print(render_scorecard(case), end="")
         return 0
     if args.command == "learn":
         case = agent.learn(args.decision_id)
@@ -284,6 +307,17 @@ def _dispatch(agent: DecisionAgent, args: argparse.Namespace) -> int:
             return 0
         print(ask_graph(agent.cases(), question, args.decision), end="")
         return 0
+    if args.command == "dependencies":
+        print(render_dependencies(agent.cases(), args.decision), end="")
+        return 0
+    if args.command == "impact":
+        question = " ".join(args.question)
+        if not question:
+            case = _require(agent, args.decision)
+            print(render_impact(case, agent.cases()), end="")
+            return 0
+        print(answer_impact(agent.cases(), question, args.decision), end="")
+        return 0
     if args.command == "claims":
         print(render_claims(_require(agent, args.decision_id)), end="")
         return 0
@@ -307,7 +341,7 @@ def _dispatch(agent: DecisionAgent, args: argparse.Namespace) -> int:
         if len(updated.reevaluations) == before:
             print("No re-evaluation. The evidence does not change an assumption, a risk, or the expected outcome.")
             return 0
-        print(render_review(updated.reevaluations[-1], updated.decision), end="")
+        print(render_watch(updated), end="")
         return 0
     if args.command == "serve":
         import uvicorn

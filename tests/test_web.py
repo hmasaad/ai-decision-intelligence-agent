@@ -90,14 +90,19 @@ def test_demo_can_be_approved_tracked_and_learned(tmp_path: Path, monkeypatch):
     assert "$74,400 benefit a year" in loaded.text
     assert "6–9 weeks" in loaded.text
     assert "Human approval required" in loaded.text
+    assert "WHAT WOULD CHANGE OUR MIND?" in loaded.text
+    assert "The recommendation moves to C. Full migration." in loaded.text
     assert "Migration causes production regression" in loaded.text
     assert "Roll back if the error rate exceeds 0.5%" in loaded.text
     assert "Residual risk" in loaded.text
-    assert "Can the team allocate 2 additional engineers?" in loaded.text
+    assert "The recommendation moves to D. Managed billing service." in loaded.text
     assert "Why was it made?" in loaded.text
     assert "What evidence existed?" in loaded.text
     assert "Which alternatives were rejected?" in loaded.text
     assert "Not approved yet" in loaded.text
+    assert "Agent analyzes" in loaded.text
+    assert "Approve / Reject / Modify" in loaded.text
+    assert "Waiting for a person." in loaded.text
 
     regulated = client.post(
         "/decisions/billing-migration/evidence",
@@ -107,7 +112,10 @@ def test_demo_can_be_approved_tracked_and_learned(tmp_path: Path, monkeypatch):
     assert "Re-evaluation required" in regulated.text
     assert "no longer valid" in regulated.text
     assert "medium → low" in regulated.text
-    assert "Human review required" in regulated.text
+    assert "Trigger detected" in regulated.text
+    assert "Re-evaluation recommended." in regulated.text
+    assert "The recommendation stays." in regulated.text
+    assert "Human approval is required." in regulated.text
 
     approved = client.post(
         "/decisions/billing-migration/review",
@@ -138,13 +146,19 @@ def test_demo_can_be_approved_tracked_and_learned(tmp_path: Path, monkeypatch):
     assert "Deployment time came in at 15 minutes." in recorded.text
     assert "The expected case was 12 minutes." in recorded.text
     assert "+25%" in recorded.text
-    assert "Root cause" in recorded.text
+    assert "Why?" in recorded.text
     assert "Architecture review" in recorded.text
+    assert "$12,200 per month" in recorded.text
+    assert "$12,800 per month" in recorded.text
+    assert "$67,200 benefit" in recorded.text
+    assert "Prediction" in recorded.text
 
     learned = client.post("/decisions/billing-migration/learn", follow_redirects=True)
     assert "Estimate was optimistic." in learned.text
     assert "25%" in learned.text
     assert "Re-evaluate the estimate" in learned.text
+    assert "The recorded result is 15 minutes." in learned.text
+    assert "The recommendation stays." in learned.text
 
     home = client.get("/")
     assert "25% worse than expected" in home.text
@@ -178,6 +192,33 @@ def test_demo_can_be_approved_tracked_and_learned(tmp_path: Path, monkeypatch):
         params={"q": "Why did we choose PostgreSQL instead of DynamoDB?"},
     )
     assert "No stored decision chose those options." in unknown.text
+
+
+def test_modify_keeps_the_recommendation_and_executes_the_persons_option(tmp_path: Path, monkeypatch):
+    client = _client(tmp_path, monkeypatch)
+    client.post("/demo", follow_redirects=True)
+    missing = client.post(
+        "/decisions/billing-migration/review",
+        data={"action": "modified", "note": "", "option_key": "C"},
+        follow_redirects=True,
+    )
+    assert "Record the reasoning for this decision." in missing.text
+    page = client.post(
+        "/decisions/billing-migration/review",
+        data={
+            "action": "modified",
+            "note": "The downtime window is open this quarter.",
+            "approver": "Platform",
+            "option_key": "C",
+        },
+        follow_redirects=True,
+    )
+    assert "Modified. C. Full migration." in page.text
+    assert "The agent recommended B. Partial migration." in page.text
+    assert "Reasoning: The downtime window is open this quarter." in page.text
+    assert "This plan is C. Full migration." in page.text
+    assert "Staff the engineers the full migration requires." in page.text
+    assert "B. Partial migration" in page.text
 
 
 def test_register_creates_a_decision_that_can_be_inspected(tmp_path: Path, monkeypatch):
@@ -225,6 +266,15 @@ def test_the_graph_answers_from_the_billing_page(tmp_path: Path, monkeypatch):
         params={"graph": "Which assumptions are responsible for this decision?"},
     )
     assert "Decision graph" in page.text
+    assert "Decision impact" in page.text
+    assert "Decision dependencies" in page.text
+    assert "No other stored decision is linked." in page.text
+    assert "depends_on → Production downtime is forbidden." in page.text
+    assert "47 minutes → 12 minutes" in page.text
+    assert "Overall impact:" in page.text
+    assert "Goal affected?" in page.text
+    assert "Human approval required. The agent does not start the plan." in page.text
+    assert "No re-evaluation is triggered. The high impact is already in the brief." in page.text
     assert "Same criteria" in page.text
     assert "What happens if our assumptions change?" in page.text
     assert "Confidence is 58%, below 60%." in page.text
@@ -243,6 +293,28 @@ def test_the_graph_answers_from_the_billing_page(tmp_path: Path, monkeypatch):
     )
     assert "Constraint → Option" in why.text
     assert "because this path reaches it." in why.text
+    made = client.get(
+        "/decisions/billing-migration",
+        params={"graph": "Why was this decision made?"},
+    )
+    assert "Why was this decision made?" in made.text
+    assert "because this path reaches it." in made.text
+    supported = client.get(
+        "/decisions/billing-migration",
+        params={"graph": "Which evidence supports it?"},
+    )
+    assert "3 pieces of evidence support B. Partial migration, while 0 contradict it." in supported.text
+    depends = client.get(
+        "/decisions/billing-migration",
+        params={"graph": "Which assumptions does it depend on?"},
+    )
+    assert "Partial migration is estimated at 6 weeks." in depends.text
+    changed = client.get(
+        "/decisions/billing-migration",
+        params={"graph": "What would cause the decision to change?"},
+    )
+    assert "The recommendation moves to C. Full migration." in changed.text
+    assert "The recommendation moves to D. Managed billing service." in changed.text
     assert "No evidence on record supports this assumption." in page.text
     assert "Rests on Staffing plan." in page.text
     assert "Blocks Full migration." in page.text

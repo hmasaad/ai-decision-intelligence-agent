@@ -382,7 +382,18 @@ blockquote {
 .risks dt { color: var(--muted); }
 .risks dd { margin: 0; }
 .risks dd ul { margin: 0; padding-left: 1.1rem; }
-.brief { margin: 0; }
+.brief-page h3 {
+  margin: 20px 0 6px;
+  font-size: 0.78rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+.brief-page h3:first-child { margin-top: 0; }
+.brief-page p, .brief-page li { max-width: 68ch; }
+.brief-page p { margin: 0 0 4px; }
+.brief-page ul { margin: 0; padding-left: 1.2rem; }
+.brief-page li { margin: 4px 0; }
 .chain { display: grid; grid-template-columns: 8rem 1fr; gap: 2px 12px; margin: 8px 0 0; }
 .chain dt { color: var(--muted); }
 .chain dd { margin: 0; }

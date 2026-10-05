@@ -32,6 +32,64 @@
     <p class="banner">Re-evaluation required. A person needs to review the updated analysis.</p>
   {% endif %}
 
+  <section id="brief" class="panel">
+    <h2>Decision brief</h2>
+    {% if view.brief %}
+      <article class="brief-page">
+        {% for section in view.brief %}
+          <h3>{{ section.title }}</h3>
+          {% for line in section.lines %}
+            <p>{{ line }}</p>
+          {% endfor %}
+          {% if section.points %}
+            <ul>
+              {% for item in section.points %}
+                <li>{{ item }}</li>
+              {% endfor %}
+            </ul>
+          {% endif %}
+        {% endfor %}
+      </article>
+    {% else %}
+      <p class="meta">The brief is written after the options are estimated.</p>
+    {% endif %}
+  </section>
+
+  <section id="impact" class="panel">
+    <h2>Decision impact</h2>
+    <p class="meta">What this decision changes before it is executed. The map is the service, the metrics that move, and the assumptions it depends on.</p>
+    {% if view.impact.ready %}
+      <pre class="frame">{{ view.impact.tree }}</pre>
+      <pre class="frame">{{ view.impact.links }}</pre>
+      <pre class="frame">{{ view.impact.score }}</pre>
+      <pre class="frame">{{ view.impact.propagation }}</pre>
+      <pre class="frame">{{ view.impact.trigger }}</pre>
+      {% for section in view.impact.sections %}
+        <h3>{{ section.title }}</h3>
+        <ul>
+          {% for point in section.points %}
+            <li>{{ point }}</li>
+          {% endfor %}
+        </ul>
+      {% endfor %}
+      <ul>
+        <li><a href="/decisions/{{ case.id }}?impact=If+we+make+this+decision,+what+else+changes%3F#impact">If we make this decision, what else changes?</a></li>
+        <li><a href="/decisions/{{ case.id }}?impact=Which+existing+goals,+plans,+assumptions,+and+decisions+could+this+invalidate%3F#impact">Which existing goals, plans, assumptions, and decisions could this invalidate?</a></li>
+      </ul>
+      {% if impact_answer %}
+        <pre class="frame">{{ impact_answer }}</pre>
+      {% endif %}
+    {% else %}
+      <p class="meta">{{ view.impact.empty }}</p>
+    {% endif %}
+  </section>
+
+  <section id="dependencies" class="panel">
+    <h2>Decision dependencies</h2>
+    <p class="meta">Links between stored decisions on the same service. Critical means failure of the target leaves the source infeasible.</p>
+    <pre class="frame">{{ view.dependencies.text }}</pre>
+  </section>
+
   <section id="registry" class="panel">
     <h2>Decision registry</h2>
     <p class="meta">The stored identity of this decision.</p>
@@ -490,55 +548,43 @@
     {% endif %}
   </section>
 
-  <section id="brief" class="panel">
-    <h2>Decision brief</h2>
-    {% if case.brief %}
-      <pre class="frame brief">{{ case.brief.text }}</pre>
-    {% else %}
-      <p class="meta">The brief is written after the options are estimated.</p>
-    {% endif %}
-  </section>
-
   <section id="reevaluate" class="panel">
     <h2>Re-evaluate</h2>
-    {% if case.reevaluations %}
-      {% for item in case.reevaluations %}
-        <ol class="cascade">
-          <li>
-            <span>Original decision</span>
-            <strong>{{ case.decision }}</strong>
-          </li>
-          <li>
-            <span>New evidence</span>
-            <strong>{{ item.statement }}</strong>
-          </li>
-          <li>
-            <span>Assumption</span>
-            <p>{{ item.assumption }}</p>
-          </li>
-          <li>
-            <span>Risk</span>
-            <p>{{ item.risk }}</p>
-          </li>
-          <li>
-            <span>Expected outcome</span>
-            <p>{{ item.outcome }}</p>
-          </li>
-          <li>
-            <span>Confidence</span>
-            <strong>{{ item.confidence_before }} → {{ item.confidence_after }}</strong>
-          </li>
-          <li>
-            <span>Re-evaluate</span>
-            <strong>Human review required</strong>
-          </li>
-        </ol>
+    <p class="meta">New evidence, risks, assumptions, constraints, and actual outcomes are watched. A material change comes back to a person.</p>
+    <ul class="risks">
+      {% for item in view.monitor %}
+        <li>
+          <strong>{{ item.label }}</strong>
+          <p>{{ item.detail }}</p>
+        </li>
       {% endfor %}
-      {% if case.review_action == "approved" %}
-        <p>The earlier approval stands until a person reviews this update.</p>
+    </ul>
+    {% for item in view.reviews %}
+      <ol class="cascade">
+        <li><span>Decision</span><strong>{{ item.decision }}</strong></li>
+        <li><span>Trigger detected</span><strong>{{ item.trigger }}</strong></li>
+        <li><span>Re-evaluate</span><p>{{ item.body }}</p></li>
+        <li><span>New recommendation</span><strong>{{ item.recommendation }}</strong></li>
+        <li><span>Human approval</span><strong>{{ item.approval }}</strong></li>
+      </ol>
+      {% if item.open %}
+        <form class="review-actions" method="post" action="/decisions/{{ case.id }}/revision">
+          <label>
+            Decided by
+            <input name="approver" placeholder="Who is accepting the revision">
+          </label>
+          <label>
+            Reasoning
+            <input name="note" required placeholder="Why you accept this revision">
+          </label>
+          <button class="button button-primary" type="submit">Accept this revision</button>
+        </form>
       {% endif %}
-    {% else %}
-      <p class="meta">New evidence is checked against the assumptions, the risks, and the expected outcome.</p>
+    {% endfor %}
+    {% if case.reevaluations and case.review_action == "approved" %}
+      <p>The earlier approval stands until a person reviews this update.</p>
+    {% elif case.reevaluations and case.review_action == "modified" %}
+      <p>The earlier choice stands until a person reviews this update.</p>
     {% endif %}
     {% if case.brief %}
       <form method="post" action="/decisions/{{ case.id }}/evidence">
@@ -600,22 +646,44 @@
 
   <section id="human" class="panel">
     <h2>Human decision</h2>
-    {% if case.review_action %}
-      <p>{{ case.review_action }}{% if case.review_note %} — {{ case.review_note }}{% endif %}</p>
-    {% endif %}
+    <p class="meta">The agent stops at the recommendation. A person approves, rejects, or modifies it, and the reasoning is stored.</p>
+    <ol class="cascade">
+      {% for step in view.gate %}
+        <li>
+          <span>{{ step.label }}</span>
+          <strong>{{ step.detail }}</strong>
+          {% if step.note %}<p>{{ step.note }}</p>{% endif %}
+        </li>
+      {% endfor %}
+    </ol>
     {% if case.status.value in ["briefed", "deferred"] %}
       <form class="review-actions" method="post" action="/decisions/{{ case.id }}/review">
         <label>
-          Approved by
-          <input name="approver" placeholder="Who is approving">
+          Decided by
+          <input name="approver" placeholder="Who is deciding">
         </label>
         <label>
-          Note
-          <input name="note" placeholder="Why this call">
+          Reasoning
+          <input name="note" required placeholder="Why you approve, reject, or modify">
         </label>
+        {% if case.options %}
+          <label>
+            Modify to
+            <select name="option_key">
+              <option value="">Another option on this decision</option>
+              {% for option in case.options %}
+                {% if not case.brief or option.key != case.brief.recommendation_key %}
+                  {% set scene = case.scenario(option.key, "expected") %}
+                  <option value="{{ option.key }}">{{ option.key }}. {{ option.name }}{% if scene and not scene.feasible %} — blocked{% endif %}</option>
+                {% endif %}
+              {% endfor %}
+            </select>
+          </label>
+        {% endif %}
         <button class="button button-primary" name="action" value="approved">Approve</button>
-        <button class="button" name="action" value="deferred">Defer</button>
+        <button class="button" name="action" value="modified">Modify</button>
         <button class="button button-quiet" name="action" value="rejected">Reject</button>
+        <button class="button button-quiet" name="action" value="deferred">Defer</button>
       </form>
     {% elif not case.review_action %}
       <p class="meta">A person decides after the brief exists.</p>
@@ -625,6 +693,11 @@
   <section id="execute" class="panel">
     <h2>Execute decision</h2>
     {% if case.execution %}
+      {% if case.review_action == "modified" and case.human_choice %}
+        {% for option in case.options if option.key == case.human_choice %}
+          <p>This plan is {{ option.key }}. {{ option.name }}.</p>
+        {% endfor %}
+      {% endif %}
       <ol class="steps">
         {% for step in case.execution %}
           <li>
@@ -650,16 +723,51 @@
 
   <section id="outcome" class="panel">
     <h2>Outcome tracking</h2>
+    <p class="meta">Prediction, then what happened, then the variance, why, and the learning.</p>
+    {% if view.scorecard %}
+      <div class="table-wrap">
+        <table class="summary">
+          <thead>
+            <tr>
+              <th></th>
+              <th>Expected</th>
+              <th>Actual</th>
+              <th>Variance</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in view.scorecard %}
+              <tr>
+                <td>{{ row.label }}</td>
+                <td>{{ row.expected }}</td>
+                <td>{{ row.actual }}</td>
+                <td>{{ row.variance }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% for row in view.scorecard if row.why %}
+        <h3>{{ row.label }}</h3>
+        <ol class="cascade">
+          <li><span>Prediction</span><strong>{{ row.expected }}</strong></li>
+          <li><span>Actual</span><strong>{{ row.actual }}</strong></li>
+          <li><span>Variance</span><strong>{{ row.variance }}</strong></li>
+          <li><span>Why?</span><p>{{ row.why }}</p></li>
+          <li><span>Learning</span><p>{{ row.learning }}</p></li>
+        </ol>
+      {% endfor %}
+    {% endif %}
     {% if view.outcomes %}
       {% for line in view.outcomes %}
         <article class="outcome-card">
           <h3>{{ line.name }}</h3>
           <p>{{ line.name }} came in at {{ line.actual }}. The expected case was {{ line.predicted }}.</p>
           <dl class="chain">
-            <dt>Predicted</dt><dd>{{ line.predicted }}</dd>
+            <dt>Prediction</dt><dd>{{ line.predicted }}</dd>
             <dt>Actual</dt><dd>{{ line.actual }}</dd>
             <dt>Variance</dt><dd>{{ line.variance }}</dd>
-            <dt>Root cause</dt><dd>{{ line.cause }}</dd>
+            <dt>Why?</dt><dd>{{ line.cause }}</dd>
             <dt>Learning</dt><dd>{{ line.learning }}</dd>
           </dl>
         </article>
@@ -738,7 +846,7 @@
 
   <section id="graph" class="panel">
     <h2>Decision graph</h2>
-    <p class="meta">Evidence supports the assumptions. The constraints admit the option. That option’s outcome is why the recommendation was reached.</p>
+    <p class="meta">The graph answers why this decision was made, which evidence supports it, which assumptions it depends on, and what would cause it to change.</p>
     {% if view.reason.ready %}
       <div class="reason">
         <div class="reason-band">
@@ -795,11 +903,15 @@
     <form class="frame-form" method="get" action="/decisions/{{ case.id }}">
       <label>
         Ask the graph
-        <input name="graph" value="{{ request.query_params.get('graph', '') }}" placeholder="Why did you reach this recommendation?">
+        <input name="graph" value="{{ request.query_params.get('graph', '') }}" placeholder="Why was this decision made?">
       </label>
       <button class="button button-primary" type="submit">Trace it</button>
     </form>
     <ul>
+      <li><a href="/decisions/{{ case.id }}?graph=Why+was+this+decision+made%3F#graph">Why was this decision made?</a></li>
+      <li><a href="/decisions/{{ case.id }}?graph=Which+evidence+supports+it%3F#graph">Which evidence supports it?</a></li>
+      <li><a href="/decisions/{{ case.id }}?graph=Which+assumptions+does+it+depend+on%3F#graph">Which assumptions does it depend on?</a></li>
+      <li><a href="/decisions/{{ case.id }}?graph=What+would+cause+the+decision+to+change%3F#graph">What would cause the decision to change?</a></li>
       <li><a href="/decisions/{{ case.id }}?graph=Why+did+you+reach+this+recommendation%3F#graph">Why did you reach this recommendation?</a></li>
       <li><a href="/decisions/{{ case.id }}?graph=Which+assumptions+are+driving+this+decision%3F#assumptions">Which assumptions are driving this decision?</a></li>
       <li><a href="/decisions/{{ case.id }}?graph=Which+assumptions+are+responsible+for+this+decision%3F#graph">Which assumptions are responsible for this decision?</a></li>

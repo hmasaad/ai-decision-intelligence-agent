@@ -6,7 +6,8 @@ from decision.errors import DecisionError
 from decision.execute import execution_plan
 from decision.frame import decision_line, default_metrics, is_migration
 from decision.learn import build_outcomes, priors_from, write_lesson
-from decision.models import DecisionCase, Prior, Stage
+from decision.models import DecisionCase, Option, Prior, Stage
+from decision.reevaluate import outcome_trigger
 from decision.risk import build_risks
 from decision.simulate import build_bands, build_scenarios, is_modeled
 
@@ -70,36 +71,78 @@ def apply_review(
     note: str,
     reviewed_at: str,
     approved_by: str = "",
+    option_key: str = "",
 ) -> DecisionCase:
-    if action not in {"approved", "rejected", "deferred"}:
-        raise DecisionError("Review action must be approved, rejected, or deferred.")
+    if action not in {"approved", "rejected", "deferred", "modified"}:
+        raise DecisionError("Review action must be approved, rejected, deferred, or modified.")
+    if not note.strip():
+        raise DecisionError("Record the reasoning for this decision.")
     if case.status not in {Stage.briefed, Stage.deferred}:
         raise DecisionError("This decision is not waiting for a person.")
     if action == "approved":
-        if case.brief is None or case.brief.recommendation_key is None:
-            raise DecisionError("This decision is framed and not ready to approve.")
-        option = case.option(case.brief.recommendation_key)
-        if option is None:
-            raise DecisionError("The recommended option is missing.")
-        return case.model_copy(
-            update={
-                "status": Stage.executing,
-                "review_action": action,
-                "review_note": note,
-                "reviewed_at": reviewed_at,
-                "approved_by": approved_by.strip(),
-                "execution": execution_plan(case, option),
-            }
-        )
+        option = _recommended_option(case)
+        return _decided(case, action, note, reviewed_at, approved_by, option, option.key)
+    if action == "modified":
+        option = _modified_option(case, option_key)
+        return _decided(case, action, note, reviewed_at, approved_by, option, option.key)
     return case.model_copy(
         update={
             "status": Stage.rejected if action == "rejected" else Stage.deferred,
             "review_action": action,
-            "review_note": note,
+            "review_note": note.strip(),
             "reviewed_at": reviewed_at,
+            "approved_by": approved_by.strip(),
+            "human_choice": "",
             "execution": [],
         }
     )
+
+
+def _recommended_option(case: DecisionCase) -> Option:
+    if case.brief is None or case.brief.recommendation_key is None:
+        raise DecisionError("This decision is framed and not ready to approve.")
+    option = case.option(case.brief.recommendation_key)
+    if option is None:
+        raise DecisionError("The recommended option is missing.")
+    return option
+
+
+def _modified_option(case: DecisionCase, option_key: str) -> Option:
+    recommended = _recommended_option(case)
+    key = option_key.strip()
+    if not key:
+        raise DecisionError("Modify names an option already on this decision.")
+    option = case.option(key)
+    if option is None:
+        raise DecisionError("That option is not on this decision.")
+    if option.key == recommended.key:
+        raise DecisionError("That is the recommendation. Approve it, or choose another option on the record.")
+    return option
+
+
+def _decided(
+    case: DecisionCase,
+    action: str,
+    note: str,
+    reviewed_at: str,
+    approved_by: str,
+    option: Option,
+    choice: str,
+) -> DecisionCase:
+    updated = case.model_copy(
+        update={
+            "status": Stage.executing,
+            "review_action": action,
+            "review_note": note.strip(),
+            "reviewed_at": reviewed_at,
+            "approved_by": approved_by.strip(),
+            "human_choice": choice,
+            "execution": execution_plan(case, option),
+        }
+    )
+    from decision.impact import attach_impact_trigger
+
+    return attach_impact_trigger(updated)
 
 
 def complete_step(case: DecisionCase, step_id: str) -> DecisionCase:
@@ -133,4 +176,17 @@ def learn(case: DecisionCase) -> tuple[DecisionCase, list[Prior]]:
         raise DecisionError("Record the outcome before writing the lesson.")
     lesson = write_lesson(case)
     updated = case.model_copy(update={"lesson": lesson, "status": Stage.learned})
+    review = outcome_trigger(updated)
+    if review is not None and updated.brief is not None:
+        text = updated.brief.text.replace(
+            f"Confidence is {updated.brief.confidence}",
+            f"Confidence is {review.confidence_after}",
+            1,
+        )
+        brief = updated.brief.model_copy(update={"confidence": review.confidence_after, "text": text})
+        updated = updated.model_copy(
+            update={"brief": brief, "reevaluations": [*updated.reevaluations, review]}
+        )
+    elif review is not None:
+        updated = updated.model_copy(update={"reevaluations": [*updated.reevaluations, review]})
     return updated, priors_from(updated)

@@ -92,6 +92,50 @@ def test_changing_the_holding_constraints_together_is_traced():
     assert "Partial migration → Partial migration" not in answer
 
 
+def test_the_graph_answers_why_the_billing_decision_was_made():
+    case = prepare(billing_case())
+    answer = ask([case], "Why was this decision made?")
+    assert answer.startswith("Why was this decision made?")
+    assert "B. Partial migration is the recommendation because this path reaches it." in answer
+    assert "Full migration scores higher and is blocked by 3 engineers available, the 8-week timeline, and no production downtime." in answer
+    assert "Its expected outcome is $74,400 benefit." in answer
+
+
+def test_the_graph_names_the_evidence_that_supports_partial_migration():
+    case = prepare(billing_case())
+    answer = ask([case], "Which evidence supports it?")
+    assert "3 pieces of evidence support B. Partial migration, while 0 contradict it." in answer
+    assert "Architecture review, 58%." in answer
+    assert "Invoice shadow read, 74%." in answer
+    assert "Platform retrospective, 70%." in answer
+    assert "Staffing plan, 80%. Supports 3 engineers are available." in answer
+    assert "SRE (opinion), 76%." in answer
+    assert "This claim is opinion." in answer
+    assert "The timeline limit is 8 weeks. No evidence is on record for this assumption." in answer
+    assert "integration" not in answer.lower()
+
+
+def test_the_graph_names_the_assumptions_the_decision_depends_on():
+    case = prepare(billing_case())
+    answer = ask([case], "Which assumptions does it depend on?")
+    assert "Partial migration is estimated at 6 weeks." in answer
+    assert "3 engineers are available." in answer
+    assert "The timeline limit is 8 weeks." in answer
+    assert "Production downtime is forbidden." in answer
+    assert "No stored decision depends on that assumption." not in answer
+
+
+def test_the_graph_names_what_would_change_the_billing_decision():
+    case = prepare(billing_case())
+    answer = ask([case], "What would cause the decision to change?")
+    assert "Full migration scores higher and is blocked by 3 engineers available, the 8-week timeline, and no production downtime." in answer
+    assert "One of them leaves Full migration blocked" in answer
+    assert "The recommendation moves to C. Full migration." in answer
+    assert "Engineering capacity drops from 3 to 2 engineers." in answer
+    assert "The recommendation moves to D. Managed billing service." in answer
+    assert "5 engineers. Current capacity is now 3." not in answer
+
+
 def test_the_chain_continues_through_the_recorded_outcome():
     case = prepare(billing_case())
     approved = apply_review(case, "approved", "Ship the invoice slice", "2026-10-02T00:00:00+00:00", "Platform")

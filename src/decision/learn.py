@@ -11,10 +11,19 @@ def worse_by(actual: float, predicted: float, direction: str) -> float:
     return (predicted - actual) / base
 
 
+def executed_option(case: DecisionCase) -> Option | None:
+    """The option a person accepted. The recommendation is the fallback."""
+
+    key = case.human_choice
+    if not key and case.brief is not None:
+        key = case.brief.recommendation_key
+    if not key:
+        return None
+    return case.option(key)
+
+
 def build_outcomes(case: DecisionCase, actuals: dict[str, float]) -> list[Outcome]:
-    if case.brief is None or case.brief.recommendation_key is None:
-        return []
-    option = case.option(case.brief.recommendation_key)
+    option = executed_option(case)
     if option is None:
         return []
     outcomes: list[Outcome] = []

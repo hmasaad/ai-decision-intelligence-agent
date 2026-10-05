@@ -17,7 +17,7 @@ from decision.reason import render_map
 from decision.loop import apply_review, complete_step, learn, prepare, record_outcomes
 from decision.memory import recall as recall_question
 from decision.models import DecisionCase, Evidence, Prior
-from decision.reevaluate import incorporate
+from decision.reevaluate import accept_revision, incorporate
 from decision.registry import apply_update, register_case, render_registry
 from decision.store import utc_now
 from decision.text import slug
@@ -145,9 +145,25 @@ class DecisionAgent:
         with store.open_db(self.home) as connection:
             return store.list_priors(connection, pattern)
 
-    def review(self, case_id: str, action: str, note: str = "", by: str = "") -> DecisionCase:
+    def review(
+        self,
+        case_id: str,
+        action: str,
+        note: str = "",
+        by: str = "",
+        option_key: str = "",
+    ) -> DecisionCase:
         case = self._require(case_id)
-        return self._save(apply_review(case, action, note.strip(), utc_now(), approved_by=by.strip()))
+        return self._save(
+            apply_review(
+                case,
+                action,
+                note.strip(),
+                utc_now(),
+                approved_by=by.strip(),
+                option_key=option_key.strip(),
+            )
+        )
 
     def complete_step(self, case_id: str, step_id: str) -> DecisionCase:
         case = self._require(case_id)
@@ -156,6 +172,10 @@ class DecisionAgent:
     def record_outcomes(self, case_id: str, actuals: dict[str, float]) -> DecisionCase:
         case = self._require(case_id)
         return self._save(record_outcomes(case, actuals))
+
+    def accept_revision(self, case_id: str, note: str = "", by: str = "") -> DecisionCase:
+        case = self._require(case_id)
+        return self._save(accept_revision(case, note.strip(), by.strip()))
 
     def add_evidence(self, case_id: str, evidence: Evidence) -> DecisionCase:
         case = self._require(case_id)

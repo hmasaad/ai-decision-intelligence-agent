@@ -127,11 +127,21 @@ def _rejected(case: DecisionCase) -> list[str]:
 
 
 def _approved(case: DecisionCase) -> str:
-    if case.review_action != "approved":
+    if case.review_action not in {"approved", "modified"}:
         return "Not approved yet. The brief is waiting for a person."
     when = case.reviewed_at[:10] if case.reviewed_at else "an unrecorded date"
     who = case.approved_by or "a person whose name was not recorded"
-    line = f"Approved by {who} on {when}."
+    if case.review_action == "modified":
+        picked = case.option(case.human_choice) if case.human_choice else None
+        choice = f"{picked.key}. {picked.name}" if picked is not None else "another option"
+        recommended = ""
+        if case.brief is not None and case.brief.recommendation_key:
+            option = case.option(case.brief.recommendation_key)
+            if option is not None:
+                recommended = f" The agent recommended {option.key}. {option.name}."
+        line = f"Modified by {who} on {when}.{recommended} The person chose {choice}."
+    else:
+        line = f"Approved by {who} on {when}."
     if case.review_note:
         line += f" Note: {case.review_note}."
     if case.asked_by:

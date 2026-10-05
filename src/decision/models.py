@@ -229,7 +229,7 @@ class Prior(BaseModel):
 
 
 class Reevaluation(BaseModel):
-    """Why new evidence sent a decision back to a person."""
+    """Why a material change sent a decision back to a person."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -240,6 +240,11 @@ class Reevaluation(BaseModel):
     outcome: str
     confidence_before: str
     confidence_after: str
+    kind: str = "evidence"
+    trigger: str = ""
+    recommendation: str = ""
+    accepted_by: str = ""
+    accepted_note: str = ""
 
 
 class DecisionCase(BaseModel):
@@ -269,6 +274,7 @@ class DecisionCase(BaseModel):
     review_note: str = ""
     reviewed_at: str = ""
     approved_by: str = ""
+    human_choice: str = ""
     execution: list[ExecutionStep] = Field(default_factory=list)
     outcomes: list[Outcome] = Field(default_factory=list)
     lesson: Lesson | None = None

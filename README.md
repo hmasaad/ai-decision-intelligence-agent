@@ -189,31 +189,39 @@ decide assumptions billing-migration
 
 ## What the billing brief says
 
-The brief is one page. It informs the person who has to approve it.
-
-Full migration scores higher on the four metrics. It needs 5 engineers, 14 weeks, and a production cutover, so it is blocked. The managed service misses the 8-week timeline. Doing nothing fits and does not move cost or deploy time. Partial migration is the option offered for review. The status line is human approval required.
+The brief is the page a person reads before approving. It names the option, the measured confidence, why that option, the assumptions it rests on, the largest recorded risk, and the changes that move the recommendation. Confidence is 58%. That is the architecture review, the weaker source on the expected return.
 
 ```
 DECISION
 Should the billing service migrate?
 
-SCENARIOS
-Best:      $91,200 benefit
-Expected:  $74,400 benefit
-Worst:     $39,600 benefit
+RECOMMENDATION
+B. Partial migration
 
-KEY RISKS
-• Migration causes production regression — medium probability, high impact, residual low/medium
-• Migration delay — medium probability, high impact, residual medium
-• Engineering capacity — high probability, high impact, residual medium
+CONFIDENCE
+58%
+Confidence is medium, 58%. Expected return is $74,400 benefit a year, inferred, with 58% confidence.
 
-OPEN QUESTIONS
-• Can the team allocate 2 additional engineers?
-• Is the downtime requirement negotiable?
-• Can the timeline extend to 9 weeks?
+WHY
+• Expected infrastructure cost is 34% lower, $12,200 a month against $18,400. The annual change is $74,400 benefit.
+• Expected incident rate is 2 a quarter, against 6 on the current service.
+• Uses 3 of the 3 available engineers and 6 weeks against the 8-week limit. Production downtime is not required.
 
-DECISION STATUS
-Human approval required
+KEY ASSUMPTIONS
+• Partial migration is estimated at 6 weeks.
+• 3 engineers are available.
+• The timeline limit is 8 weeks.
+• Production downtime is forbidden.
+
+BIGGEST RISK
+Engineering capacity. Full migration needs 5 engineers and 3 are available.
+
+WHAT WOULD CHANGE OUR MIND?
+• Engineering capacity changes from 3 to 5, the timeline changes from 8 to 14 weeks, and production downtime is allowed. The recommendation moves to C. Full migration.
+• Engineering capacity drops from 3 to 2 engineers. The timeline derives to 12 weeks. The recommendation moves to D. Managed billing service.
+
+NEXT ACTION
+Human approval required. If approved, the first step is: Put a strangler facade in front of the service. Weeks 1–2.
 ```
 
 ## Risks
@@ -335,6 +343,34 @@ Labor cost               Unknown                   Unknown
 
 The return is inferred, so it cannot be more confident than the cost estimate it is built from. Labor stays unknown: there is no rate on record, and none is invented.
 
+## Human approval
+
+The agent analyzes, then recommends, then stops. A person reviews the brief and approves, rejects, or modifies it. Execution starts from the option that person accepted. Reject and defer do not start a plan.
+
+Modify chooses another option already on the decision. The brief keeps the agent's recommendation. The person's option, and their reasoning, are stored beside it. Choosing full migration records that it is still blocked: it needs 5 engineers, 14 weeks, and production downtime.
+
+```
+Agent analyzes
+The brief is written.
+↓
+Agent recommends
+B. Partial migration.
+Confidence 58%.
+↓
+Human reviews
+Waiting for a person.
+↓
+Approve / Reject / Modify
+No decision recorded.
+↓
+Execution
+Execution waits for a person.
+```
+
+```bash
+decide review billing-migration modified --option C --by Platform --note "The downtime window is open this quarter."
+```
+
 ```bash
 decide brief billing-migration
 decide review billing-migration approved --note "Ship the invoice slice"
@@ -368,7 +404,23 @@ Not approved yet. The brief is waiting for a person.
 
 ## Outcomes
 
-After the work ships, each metric is read as predicted, actual, variance, root cause, and learning. The cause is taken from the record. A miss inside the estimate band is attributed to that estimate, not to a story that was never written down.
+After the work ships, cost, timeline, and return are read as prediction, actual, variance, why, and learning. Cost is the infrastructure bill. Timeline is the engineering effort. The return is the annual infrastructure benefit, inferred from that bill. The billing prediction is $12,200 a month, 6 weeks, and a $74,400 benefit. The recorded result is $12,800 a month, 7 weeks, and a $67,200 benefit.
+
+```
+Expected
+Cost      $12,200 per month
+Timeline  6 weeks
+ROI       $74,400 benefit
+
+Actual
+Cost      $12,800 per month
+Timeline  7 weeks
+ROI       $67,200 benefit
+```
+
+The return fell by 10% on the rounded variance and stays inside the 10% line, so the expected return holds. Effort matches the notifications precedent at 7 weeks, so the next estimate starts there. Deployment time is a separate metric: 15 minutes against an expected 12, inside the 9–18 minute band.
+
+Each metric is still read as prediction, actual, variance, why, and learning. The cause is taken from the record. A miss inside the estimate band is attributed to that estimate.
 
 ```
 Deployment time
@@ -383,33 +435,33 @@ Effort came in at 7 weeks, which matches the notifications precedent rather than
 
 ## Re-evaluation
 
-New evidence is checked against the decision that was already made. An assumption that no longer holds, a risk that moves, or an expected outcome that changes drops the confidence one step and sends the analysis back to a person. The earlier approval stands until that review.
+Five things are watched: new evidence, new risks, changed assumptions, changed constraints, and actual outcomes. A material change drops confidence one step and comes back to a person. The agent can recommend again. It does not approve the revision.
+
+The payments regulation retires the no-downtime assumption. Full migration loses that block and stays blocked by headcount and the timeline. The recommendation stays B. Partial migration.
+
+A recorded deployment time of 15 minutes, against an expected 12, is a 25% miss on a heavily weighted metric. That also asks a person to accept the revision. The recommendation stays partial migration. The next estimate of deployment time starts from 15 minutes. The execution plan already run is left in place.
+
+A headcount change uses the recorded numbers. Moving the available team from 3 engineers to 2 makes partial migration infeasible, and the recommendation moves to doing nothing.
 
 ```bash
 decide evidence billing-migration --regulation
 ```
 
 ```
-Original decision
+Decision
 Should the billing service migrate?
-
-New evidence
-A new payments regulation requires a scheduled production window for billing changes.
-
-Assumption
-The assumption that production downtime is forbidden is no longer valid.
-
-Risk
-Risk changed. Full migration is no longer blocked by downtime.
-
-Expected outcome
-The expected outcome is unchanged at $74,400 benefit.
-
-Confidence
-medium → low
-
+↓
+Trigger detected
+The original decision assumed no production downtime. Current evidence requires a production window. Re-evaluation recommended.
+↓
 Re-evaluate
-Human review required.
+The assumption that production downtime is forbidden is no longer valid. Risk changed. Full migration is no longer blocked by downtime. The expected outcome is unchanged at $74,400 benefit. Confidence medium → low.
+↓
+New recommendation
+B. Partial migration. The recommendation stays.
+↓
+Human approval
+Human approval is required. The earlier decision stands until a person reviews this update.
 ```
 
 ## Decision graph
@@ -482,13 +534,74 @@ Production downtime is forbidden.
 Full migration scores higher and is blocked by 3 engineers available, the 8-week timeline, and no production downtime. Partial migration is the option those constraints leave open. Its expected outcome is $74,400 benefit.
 ```
 
+The first questions the graph answers are why the decision was made, which evidence supports it, which assumptions it depends on, and what would cause it to change.
+
+Partial migration is the recommendation because full migration scores higher and is blocked by the recorded headcount, the 8-week timeline, and the downtime ban. Three claims support partial migration: the architecture review, the invoice shadow read, and the notifications precedent. The decision also depends on the staffing plan and the SRE opinion. The 8-week timeline has no evidence behind it. Giving full migration 5 engineers, 14 weeks, and a production window moves the recommendation to full migration. Dropping capacity from 3 engineers to 2 derives a 12-week timeline and moves the recommendation to the managed billing service. Changing only one of the blocks on full migration leaves that option blocked.
+
 ```bash
 decide graph --decision billing-migration
-decide graph "Why did you reach this recommendation?"
-decide graph "Which assumptions are responsible for this decision?"
-decide graph "What evidence would invalidate it?"
-decide graph "Which decisions depend on the no-downtime assumption?"
-decide graph "What happens if this constraint changes?"
+decide graph "Why was this decision made?"
+decide graph "Which evidence supports it?"
+decide graph "Which assumptions does it depend on?"
+decide graph "What would cause the decision to change?"
+```
+
+## Decision impact
+
+Before a decision is executed, the map names what it affects, what it depends on, and which other stored decision it conflicts with. The groups come from the record. Billing has a service, engineering, operations, business, and a goal. It does not invent a product, security, or revenue branch.
+
+Partial migration keeps the billing service and moves the invoice pipeline behind a strangler facade. Deployment time moves from 47 minutes to 12 minutes. Engineering effort moves from 0 weeks to 6 weeks and uses all 3 available engineers, so full migration stays blocked. Incident rate moves from 6 a quarter to 2. Infrastructure cost moves from $18,400 a month to $12,200. The annual change is $74,400 benefit. The goal, reduce operational cost and deployment time, still holds.
+
+The decision depends on the 6-week estimate, the 3 available engineers, the 8-week timeline, and the downtime ban. It breaks none of those at the expected case. The worst case needs 9 weeks, so that case would break the timeline. Invoice delays after billing deploys are on record, and no separate measure of those delays is stored. No other stored decision is affected until a second decision about the same service chooses a different option.
+
+Each affected area is scored from the record. Severity is high when a recorded risk impact is high, or a metric moves by half or more. A move of 20% or more is medium. Probability uses the recorded risk likelihood, or the confidence of the estimate when no risk is filed there. Scope is high when the option uses the whole recorded team, or a metric moves by half or more. Reversibility follows the option: partial migration is reversible, and the residual risk is removing the fallback path early. Confidence stays at the recorded figure, 58% for the return and the architecture review, 74% for the invoice shadow read. Overall impact is the highest severity.
+
+```
+Service impact:      Medium
+Engineering impact:  High
+Operations impact:   High
+Business impact:     Medium
+Goal impact:         High
+Overall impact:      High
+```
+
+The goal chain uses the same record. The goal is affected and still holds. The subgoals are the metrics that goal names: deployment time and infrastructure cost. The plan is the strangler facade, the first slice, and the week-6 cutover, and it has not started. The agent action is human approval. The agent does not start the plan.
+
+A high impact that is already in the brief does not reopen the decision. Re-evaluation starts on its own when that impact breaks an assumption, sets the goal back, or conflicts with another decision on the same service. The payments regulation does this: downtime is no longer forbidden, the recommendation stays partial migration, and the plan is not replaced until a person reviews it. Choosing full migration does it too: the plan is running, and it breaks headcount, the timeline, and the downtime ban. The plan waits until a person confirms that impact. A material outcome, deployment time of 15 minutes against an expected 12, triggers the same chain and leaves the execution plan that already ran in place.
+
+```
+Decision Impact Analysis
+B. Partial migration. Overall impact is High.
+↓
+Significant impact detected
+Yes. Engineering, Operations, and the goal are high.
+↓
+Affected goal/plan identified
+The goal still holds. The plan has not started.
+↓
+Re-evaluation triggered
+No re-evaluation is triggered. The high impact is already in the brief.
+↓
+Decision / plan updated
+B. Partial migration. The recommendation stays. The plan has not started.
+```
+
+```bash
+decide impact --decision billing-migration
+decide impact "If we make this decision, what else changes?"
+decide impact "Which existing goals, plans, assumptions, and decisions could this invalidate?"
+```
+
+## Decision dependencies
+
+Stored decisions on the same service link to each other. The relationship is enables, blocks, depends_on, conflicts_with, or invalidates. Each link records its source, target, type, strength, confidence, criticality, and evidence.
+
+One billing decision has no other decision to link. A second billing decision that chooses full migration is blocked by the partial-migration decision: full migration needs 5 engineers and 3 are available, needs 14 weeks against the 8-week limit, and requires production downtime. The two choices conflict. Full migration invalidates the partial decision, and that link is critical: failure of the full-migration decision will invalidate the partial one. Confidence is low because the 8-week timeline has no evidence on record. Staffing is 80%. The downtime ban rests on the SRE opinion at 76%.
+
+A decision whose constraints admit 5 engineers, 14 weeks, and a production window enables that full migration. The full-migration decision critically depends on it, and failure of the enabling decision will invalidate full migration.
+
+```bash
+decide dependencies --decision billing-migration
 ```
 
 ## Alternative generation
@@ -521,7 +634,7 @@ decide alternatives billing-migration
 | `decide list` | List decisions and their status |
 | `decide show ID` | Print the frame |
 | `decide brief ID` | Print the brief |
-| `decide review ID approved\|rejected\|deferred` | Record the human decision |
+| `decide review ID approved\|rejected\|deferred\|modified` | Record the human decision and their reasoning |
 | `decide step ID STEP` | Mark an execution step done |
 | `decide outcome ID metric=value ...` | Record what happened |
 | `decide learn ID` | Write the lesson and store priors |
@@ -534,5 +647,7 @@ decide alternatives billing-migration
 | `decide confidence ID` | Show the recommendation, its confidence, and the main risks |
 | `decide evidence ID --regulation` | Re-check a decision against new evidence |
 | `decide graph --decision ID` | Show the path from evidence to the recommendation |
-| `decide graph "Why did you reach this recommendation?"` | Ask why the recommendation was reached |
+| `decide graph "Why was this decision made?"` | Ask why the decision was made |
+| `decide impact --decision ID` | Show what a decision affects before it is executed |
+| `decide dependencies --decision ID` | Show how stored decisions depend on each other |
 | `decide serve` | Open the page that manages this workspace |

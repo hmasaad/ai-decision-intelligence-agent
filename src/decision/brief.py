@@ -1,9 +1,20 @@
-"""The decision brief a person reads before approving."""
+"""The decision brief a person reads before approving.
 
+The page names the decision, the option, a measured confidence, why that
+option, the assumptions it rests on, the largest recorded risk, what would
+move the recommendation, and the next action. Every line comes from the
+record already built.
+"""
+
+from urllib.parse import parse_qs
+
+from decision.assumptions import driving
+from decision.execute import execution_plan
 from decision.models import Band, DecisionBrief, DecisionCase, Option, Risk, Scenario
 from decision.simulate import recommend
 from decision.text import plain
 from decision.uncertainty import judgments, return_confidence
+from decision.whatif import answer, opening
 
 
 def write_brief(
@@ -146,56 +157,260 @@ def _text(
     questions: list[str],
     uncertainties: list[str],
 ) -> str:
-    options = "\n".join(f"{item.key}. {item.name}" for item in case.options) or "Not stated."
-    evidence = "\n".join(f"• {line}" for line in _evidence(case)) or "• No measured evidence yet."
-    scenes = _scenes(scenarios, chosen.key if chosen else None)
-    risk_lines = "\n".join(
-        f"• {risk.title} — {risk.likelihood} probability, {risk.impact} impact, residual {risk.residual}"
-        for risk in risks
-    ) or "• None recorded."
-    question_lines = "\n".join(f"• {line}" for line in questions) or "• None."
+    staged = case.model_copy(
+        update={
+            "scenarios": scenarios,
+            "risks": risks,
+            "brief": DecisionBrief(
+                recommendation_key=chosen.key if chosen else None,
+                confidence=confidence,
+                rationale=[],
+                change_conditions=list(questions),
+                uncertainties=list(uncertainties),
+                text="pending",
+            ),
+        }
+    )
+    decision = case.decision.strip() or "Not stated."
     if chosen is None:
-        review = "No feasible option is ready for review."
-    else:
-        measured = return_confidence(case, chosen.key)
-        percent = f", {round(measured * 100)}%" if measured is not None else ""
-        review = (
-            f"For review: {chosen.key}. {chosen.name}. "
-            f"Confidence is {confidence}{percent}. A person makes the call."
+        return _document(
+            decision,
+            "Not recommended yet.",
+            "Not scored yet.",
+            ["No option satisfies the constraints, so there is nothing to recommend."],
+            ["None recorded."],
+            "None recorded.",
+            ["Nothing is scored yet, so a change cannot be traced."],
+            "No feasible option is ready for review.",
         )
-    uncertainty = f"\n{uncertainties[0]}" if uncertainties else ""
-    return (
-        f"DECISION\n{case.decision or 'Not stated.'}\n\n"
-        f"OBJECTIVE\n{case.objective.strip() or 'Not stated.'}\n\n"
-        f"OPTIONS\n{options}\n\n"
-        f"KEY EVIDENCE\n{evidence}\n\n"
-        f"SCENARIOS\n{scenes}{uncertainty}\n\n"
-        f"KEY RISKS\n{risk_lines}\n\n"
-        f"OPEN QUESTIONS\n{question_lines}\n\n"
-        f"DECISION STATUS\nHuman approval required\n{review}\n"
+    assumptions = [item.statement for item in driving(staged)] or ["None recorded."]
+    mind = _mind(staged) or ["No probed change moves this recommendation."]
+    return _document(
+        decision,
+        f"{chosen.key}. {chosen.name}",
+        _confidence_block(case, chosen, confidence, uncertainties),
+        _why(staged, chosen),
+        assumptions,
+        _biggest(risks),
+        mind,
+        _action(staged, chosen),
     )
 
 
-def _evidence(case: DecisionCase) -> list[str]:
-    ranked = [
-        item
-        for item in case.evidence
-        if item.value is not None and item.option_key is None and item.confidence >= 0.75
-    ]
-    order = {"infra_cost": 0, "deploy_time": 1, "incident_rate": 2}
-    ranked.sort(key=lambda item: (order.get(item.metric_id or "", 9), -item.confidence))
-    return [item.statement for item in ranked[:3]]
+def _document(
+    decision: str,
+    recommendation: str,
+    confidence: str,
+    why: list[str],
+    assumptions: list[str],
+    biggest: str,
+    mind: list[str],
+    action: str,
+) -> str:
+    return (
+        f"DECISION\n{decision}\n\n"
+        f"RECOMMENDATION\n{recommendation}\n\n"
+        f"CONFIDENCE\n{confidence}\n\n"
+        f"WHY\n{_bullets(why)}\n\n"
+        f"KEY ASSUMPTIONS\n{_bullets(assumptions)}\n\n"
+        f"BIGGEST RISK\n{biggest}\n\n"
+        f"WHAT WOULD CHANGE OUR MIND?\n{_bullets(mind)}\n\n"
+        f"NEXT ACTION\n{action}\n"
+    )
 
 
-def _scenes(scenarios: list[Scenario], key: str | None) -> str:
-    if key is None:
-        return "Not estimated."
-    rows: list[tuple[str, str]] = []
-    for label, name in (("Best", "optimistic"), ("Expected", "expected"), ("Worst", "pessimistic")):
-        scenario = next((item for item in scenarios if item.option_key == key and item.name == name), None)
-        rows.append((f"{label}:", scenario.headline if scenario else "Not estimated."))
-    width = max(len(label) for label, _ in rows)
-    return "\n".join(f"{label:<{width}}  {value}" for label, value in rows)
+def _bullets(items: list[str]) -> str:
+    return "\n".join(f"• {item}" for item in items)
+
+
+def _confidence_block(
+    case: DecisionCase,
+    chosen: Option,
+    confidence: str,
+    uncertainties: list[str],
+) -> str:
+    measured = return_confidence(case, chosen.key)
+    if measured is None:
+        percent = "Not scored yet."
+        line = f"Confidence is {confidence}."
+    else:
+        percent = f"{round(measured * 100)}%"
+        line = f"Confidence is {confidence}, {percent}."
+    if uncertainties:
+        line = f"{line} {uncertainties[0]}"
+    return f"{percent}\n{line}"
+
+
+def _why(case: DecisionCase, chosen: Option) -> list[str]:
+    baseline = next((item for item in case.options if item.role == "status_quo"), None)
+    if baseline is None and case.options:
+        baseline = case.options[0]
+    chosen_scene = case.scenario(chosen.key, "expected")
+    base_scene = case.scenario(baseline.key, "expected") if baseline is not None else None
+    lines: list[str] = []
+    if baseline is not None and baseline.key == chosen.key:
+        lines.append("The current service stays in place. Expected cost and incident rate do not move.")
+    else:
+        cost = _cost_line(base_scene, chosen_scene)
+        if cost:
+            lines.append(cost)
+        incidents = _incident_line(base_scene, chosen_scene)
+        if incidents:
+            lines.append(incidents)
+    fit = _fit_line(case, chosen)
+    if fit:
+        lines.append(fit)
+    return lines or ["No comparison is on record."]
+
+
+def _cost_line(baseline: Scenario | None, chosen: Scenario | None) -> str:
+    if baseline is None or chosen is None:
+        return ""
+    before = baseline.values.get("infra_cost")
+    after = chosen.values.get("infra_cost")
+    if before is None or after is None or before <= 0:
+        return ""
+    percent = round((before - after) / before * 100)
+    if percent > 0:
+        move = f"{percent}% lower"
+    elif percent < 0:
+        move = f"{abs(percent)}% higher"
+    else:
+        move = "unchanged"
+    annual = f" The annual change is {chosen.headline}." if chosen.headline else ""
+    return (
+        f"Expected infrastructure cost is {move}, "
+        f"${after:,.0f} a month against ${before:,.0f}.{annual}"
+    )
+
+
+def _incident_line(baseline: Scenario | None, chosen: Scenario | None) -> str:
+    if baseline is None or chosen is None:
+        return ""
+    before = baseline.values.get("incident_rate")
+    after = chosen.values.get("incident_rate")
+    if before is None or after is None:
+        return ""
+    if after < before:
+        relation = "against"
+    elif after > before:
+        relation = "above"
+    else:
+        relation = "the same as"
+    return (
+        f"Expected incident rate is {plain(after)} a quarter, "
+        f"{relation} {plain(before)} on the current service."
+    )
+
+
+def _fit_line(case: DecisionCase, chosen: Option) -> str:
+    parts: list[str] = []
+    available = _limit(case, "headcount")
+    weeks = _limit(case, "timeline")
+    if chosen.engineers is not None and available is not None:
+        parts.append(f"uses {plain(chosen.engineers)} of the {plain(available)} available engineers")
+    elif chosen.engineers is not None:
+        parts.append(f"uses {plain(chosen.engineers)} engineers")
+    if chosen.weeks is not None and weeks is not None:
+        parts.append(f"{plain(chosen.weeks)} weeks against the {plain(weeks)}-week limit")
+    elif chosen.weeks is not None:
+        parts.append(f"{plain(chosen.weeks)} weeks")
+    if not parts and chosen.requires_downtime is None:
+        return ""
+    sentence = _join(parts)
+    if sentence:
+        sentence = sentence[:1].upper() + sentence[1:] + "."
+    if chosen.requires_downtime is True:
+        downtime = "Production downtime is required."
+    elif chosen.requires_downtime is False:
+        downtime = "Production downtime is not required."
+    else:
+        downtime = ""
+    return " ".join(part for part in (sentence, downtime) if part)
+
+
+def _biggest(risks: list[Risk]) -> str:
+    if not risks:
+        return "None recorded."
+    rank = {"high": 3, "medium": 2, "low": 1}
+    ordered = sorted(
+        risks,
+        key=lambda risk: (rank.get(risk.impact, 0), rank.get(risk.likelihood, 0)),
+        reverse=True,
+    )
+    top = ordered[0]
+    if top.detail:
+        return f"{top.title}. {top.detail}"
+    return top.title
+
+
+def _mind(case: DecisionCase) -> list[str]:
+    lines: list[str] = []
+    link = opening(case)
+    if link:
+        item = _asked(case, link)
+        if item is not None and item.changed:
+            lines.append(_flip(item))
+    engineers = _limit(case, "headcount")
+    weeks = _limit(case, "timeline")
+    if engineers is not None and engineers > 1 and weeks is not None:
+        shorter = answer(case, engineers=engineers - 1, from_engineers=engineers, from_weeks=weeks)
+        if shorter is not None and shorter.changed:
+            timeline = next((step.after for step in shorter.steps if step.label == "Timeline"), "")
+            derived = f" The timeline derives to {timeline}." if timeline else ""
+            lines.append(
+                f"Engineering capacity drops from {plain(engineers)} to {plain(engineers - 1)} engineers."
+                f"{derived} The recommendation moves to {shorter.recommendation_after}."
+            )
+    return lines
+
+
+def _asked(case: DecisionCase, link: str):
+    query = parse_qs(link)
+
+    def number(key: str) -> float | None:
+        if key not in query:
+            return None
+        return float(query[key][0])
+
+    downtime = None
+    if "downtime" in query:
+        downtime = query["downtime"][0] != "allow"
+    return answer(
+        case,
+        engineers=number("engineers"),
+        from_engineers=number("from_engineers"),
+        weeks=number("weeks"),
+        from_weeks=number("from_weeks"),
+        downtime_forbidden=downtime,
+    )
+
+
+def _flip(item) -> str:
+    prefix = "what happens if "
+    body = item.question
+    if body.lower().startswith(prefix):
+        body = body[len(prefix):]
+        body = body[:1].upper() + body[1:]
+    if body.endswith("?"):
+        body = body[:-1] + "."
+    return f"{body} The recommendation moves to {item.recommendation_after}."
+
+
+def _action(case: DecisionCase, chosen: Option) -> str:
+    steps = execution_plan(case, chosen)
+    if not steps:
+        return "Human approval required."
+    first = steps[0]
+    window = f" {first.window}." if first.window else ""
+    return f"Human approval required. If approved, the first step is: {first.name}{window}"
+
+
+def _limit(case: DecisionCase, kind: str) -> float | None:
+    for item in case.constraints:
+        if item.kind == kind:
+            return item.limit
+    return None
 
 
 def _join(parts: list[str]) -> str:

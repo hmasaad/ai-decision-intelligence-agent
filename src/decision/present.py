@@ -1,5 +1,8 @@
 """View models for the command line and the decision board."""
 
+from decision.approval import build_gate
+from decision.reevaluate import approval_line, monitor
+from decision.outcomes import build_scorecard
 from decision.evidence import balance_lines, confidence_band, coverage, freshness, reliability, stance_text
 from decision.loop import HUMAN, gaps
 from decision.models import CHANNELS, DecisionCase, Stage
@@ -9,6 +12,8 @@ from decision.assumptions import track
 from decision.confidence import build_confidence
 from decision.scenarios import build_engine
 from decision.graph import build_graph
+from decision.dependencies import page_view as dependency_view
+from decision.impact import page_view
 from decision.reason import build_map
 from decision.memory import remember
 from decision.uncertainty import judgments
@@ -100,7 +105,7 @@ def metric_rows(case: DecisionCase) -> list[dict[str, object]]:
     return rows
 
 
-def dossier(case: DecisionCase) -> dict[str, object]:
+def dossier(case: DecisionCase, cases: list[DecisionCase] | None = None) -> dict[str, object]:
     return {
         "frame_text": render_frame(case),
         "gaps": gaps(case),
@@ -110,6 +115,7 @@ def dossier(case: DecisionCase) -> dict[str, object]:
         "ready": case.brief is not None,
         "steps_done": bool(case.execution) and all(step.status == "done" for step in case.execution),
         "outcomes": outcome_lines(case),
+        "scorecard": _scorecard_view(case),
         "claims": claim_views(case),
         "balance": balance_lines(case),
         "sources": coverage(case.evidence),
@@ -124,6 +130,12 @@ def dossier(case: DecisionCase) -> dict[str, object]:
         "comparison": _comparison_view(case),
         "engine": _engine_view(case),
         "confidence": _confidence_view(case),
+        "brief": _brief_view(case),
+        "gate": _gate_view(case),
+        "monitor": _monitor_view(case),
+        "reviews": _review_views(case),
+        "impact": _impact_view(case, cases or [case]),
+        "dependencies": dependency_view(cases or [case], case.id),
     }
 
 
@@ -164,6 +176,70 @@ def _comparison_view(case: DecisionCase) -> dict[str, object]:
             for row in found.rows
         ],
     }
+
+
+def _impact_view(case: DecisionCase, cases: list[DecisionCase]) -> dict[str, object]:
+    return page_view(case, cases)
+
+
+def _monitor_view(case: DecisionCase) -> list[dict[str, str]]:
+    return [{"label": item.label, "detail": item.detail} for item in monitor(case)]
+
+
+def _review_views(case: DecisionCase) -> list[dict[str, str]]:
+    views: list[dict[str, str]] = []
+    for item in case.reevaluations:
+        views.append(
+            {
+                "decision": case.decision or "Not stated.",
+                "trigger": item.trigger or item.statement,
+                "body": " ".join(
+                    part
+                    for part in (
+                        item.assumption,
+                        item.risk,
+                        item.outcome,
+                        f"Confidence {item.confidence_before} → {item.confidence_after}.",
+                    )
+                    if part
+                ),
+                "recommendation": item.recommendation or "Not recommended yet.",
+                "approval": approval_line(case, item),
+                "kind": item.kind,
+                "open": "yes" if item.kind in {"outcome", "impact"} and not item.accepted_note else "",
+            }
+        )
+    return views
+
+
+def _gate_view(case: DecisionCase) -> list[dict[str, str]]:
+    return [{"label": step.label, "detail": step.detail, "note": step.note} for step in build_gate(case)]
+
+
+def _brief_view(case: DecisionCase) -> list[dict[str, object]]:
+    if case.brief is None:
+        return []
+    sections: list[dict[str, object]] = []
+    title = ""
+    body: list[str] = []
+
+    def flush() -> None:
+        if not title and not any(line.strip() for line in body):
+            return
+        items = [line[2:].strip() for line in body if line.startswith("• ")]
+        prose = [line.strip() for line in body if line.strip() and not line.startswith("• ")]
+        sections.append({"title": title, "points": items, "lines": prose})
+
+    for line in case.brief.text.splitlines():
+        heading = line.strip()
+        if heading and heading == heading.upper() and any(char.isalpha() for char in heading):
+            flush()
+            title = heading
+            body = []
+        else:
+            body.append(line)
+    flush()
+    return sections
 
 
 def _confidence_view(case: DecisionCase) -> dict[str, object]:
@@ -313,6 +389,20 @@ def claim_views(case: DecisionCase, as_of=None) -> list[dict[str, str]]:
             }
         )
     return claims
+
+
+def _scorecard_view(case: DecisionCase) -> list[dict[str, str]]:
+    return [
+        {
+            "label": row.label,
+            "expected": row.expected,
+            "actual": row.actual,
+            "variance": row.variance,
+            "why": row.why,
+            "learning": row.learning,
+        }
+        for row in build_scorecard(case)
+    ]
 
 
 def outcome_lines(case: DecisionCase) -> list[dict[str, str]]:
